@@ -1,0 +1,54 @@
+# ============================================================
+# Agent 框架全局配置文件示例
+# 请复制此文件为 application.toml 并填写真实配置
+# 切勿将 application.toml 提交到版本控制系统！
+# ============================================================
+
+[llm]
+# 阿里百炼 API Key（从 https://bailian.console.aliyun.com/ 获取）
+api_key = "your-api-key-here"
+# 阿里百炼 OpenAI 兼容接口地址
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# 默认使用的模型（可选：deepseek-r1、deepseek-v3）
+default_model = "deepseek-v3"
+# 可选模型列表
+available_models = ["deepseek-r1", "deepseek-v3"]
+# 请求超时（秒）
+timeout = 60
+# 最大 token 数
+max_tokens = 4096
+
+[embedding]
+# Ollama 本地服务地址
+base_url = "http://localhost:11434"
+# Embedding 模型名称
+model = "bge-m3:latest"
+
+[database.sqlite]
+# SQLite 数据库文件路径（相对于项目根目录）
+path = "./data/agent.db"
+
+[database.milvus]
+# Milvus 本地文件路径（相对于项目根目录）
+uri = "./data/milvus_demo.db"
+# 默认集合名称
+collection_name = "agent_vectors"
+# 向量维度（bge-m3 输出 1024 维）
+dimension = 1024
+
+[server]
+# FastAPI 服务监听地址
+host = "localhost"
+# FastAPI 服务监听端口
+port = 8000
+# 是否开启调试模式（生产环境请设为 false）
+debug = true
+# 是否开启热重载
+reload = true
+
+[agent]
+# 默认系统提示词
+default_system_prompt = """你是一个智能助手，能够使用各种工具来帮助用户解决问题。
+请用中文回答用户的问题，并在需要时合理使用可用工具。"""
+# Agent 最大推理步数
+max_iterations = 10
