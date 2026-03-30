@@ -11,8 +11,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-from app.domain.shared.value_object import ValueObject
-
 logger = logging.getLogger(__name__)
 
 

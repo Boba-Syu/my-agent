@@ -12,9 +12,16 @@ const props = defineProps<{ content: string }>()
 // 配置 marked：启用 GFM（表格、任务列表等）
 marked.setOptions({ gfm: true, breaks: true })
 
+// 清理 TOOL_CALL 标记
+function cleanToolCalls(content: string): string {
+  // 移除 [TOOL_CALL] {...} 格式的标记
+  return content.replace(/\[TOOL_CALL\]\s*\{[^}]*\}/g, '')
+}
+
 const renderedHtml = computed(() => {
   if (!props.content) return ''
-  return marked.parse(props.content) as string
+  const cleaned = cleanToolCalls(props.content)
+  return marked.parse(cleaned) as string
 })
 </script>
 

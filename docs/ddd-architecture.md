@@ -438,7 +438,28 @@ class TransactionService:
 - 与外部系统交互（数据库、LLM、向量库）
 - 技术细节封装
 
-### 5.2 LangGraph Agent 实现
+### 5.2 Agent 多实现支持
+
+框架支持多种底层实现，目前提供：
+
+| 实现 | 类名 | 路径 | 状态 |
+|------|------|------|------|
+| LangGraph | `LangGraphAgent` | `infrastructure/agent/langgraph/` | ✅ 主实现 |
+| Agno | `AgnoAgent` | `infrastructure/agent/agno/` | ✅ 备选实现 |
+
+通过 `AgentFactory` 可在不同实现间切换：
+
+```python
+# 使用 LangGraph 实现（默认）
+factory = AgentFactory(implementation="langgraph")
+agent = factory.create(model="deepseek-v3", ...)
+
+# 使用 Agno 实现
+factory = AgentFactory(implementation="agno")
+agent = factory.create(model="deepseek-v3", ...)
+```
+
+### 5.3 LangGraph Agent 实现
 
 ```python
 class LangGraphAgent(AbstractAgent):
@@ -531,7 +552,76 @@ class LangGraphAgent(AbstractAgent):
         pass
 ```
 
-### 5.3 SQLite 交易仓库实现
+### 5.4 Agno Agent 实现
+
+```python
+class AgnoAgent(AbstractAgent):
+    """
+    Agno 框架实现的 Agent
+    
+    展示如何基于相同的领域抽象实现不同的底层框架
+    """
+    
+    def __init__(
+        self,
+        llm_config: LLMConfig,
+        system_prompt: str,
+        tool_adapters: list[ToolAdapter],
+        max_iterations: int = 10,
+        timeout: int = 120,
+    ):
+        self._llm_config = llm_config
+        self._system_prompt = system_prompt
+        self._max_iterations = max_iterations
+        self._timeout = timeout
+        
+        # 初始化 Agno Agent
+        self._agno_agent = self._build_agent(tool_adapters)
+    
+    def _build_agent(self, tool_adapters: list[ToolAdapter]) -> Any:
+        """构建 Agno Agent"""
+        from agno import Agent as AgnoAgent
+        from agno.models.openai import OpenAIChat
+        
+        # 转换工具
+        agno_tools = [adapter.to_agno_tool() for adapter in tool_adapters]
+        
+        return AgnoAgent(
+            model=OpenAIChat(
+                id=self._llm_config.model,
+                api_key=self._llm_config.api_key,
+                base_url=self._llm_config.base_url,
+            ),
+            description=self._system_prompt,
+            tools=agno_tools,
+            show_tool_calls=True,
+            markdown=True,
+        )
+    
+    async def ainvoke(self, message: str, thread_id: str) -> AgentResponse:
+        """实现领域层定义的异步调用接口"""
+        try:
+            response = await asyncio.wait_for(
+                self._run_agent(message),
+                timeout=self._timeout,
+            )
+            
+            return AgentResponse(
+                content=response.content if hasattr(response, "content") else str(response),
+                metadata={
+                    "model": self._llm_config.model,
+                    "thread_id": thread_id,
+                    "implementation": "agno",
+                },
+            )
+        except asyncio.TimeoutError:
+            return AgentResponse(
+                content="处理时间过长，请稍后再试或简化您的问题",
+                is_error=True,
+            )
+```
+
+### 5.5 SQLite 交易仓库实现
 
 ```python
 class SQLiteTransactionRepository(TransactionRepository):

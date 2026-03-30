@@ -6,15 +6,77 @@
 
 from __future__ import annotations
 
-import inspect
 import logging
 from typing import Any
 
 from langchain_core.tools import StructuredTool
+from pydantic import BaseModel, Field
 
 from app.domain.agent.agent_tool import AgentTool, ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def _create_args_schema(tool: AgentTool) -> type[BaseModel] | None:
+    """
+    根据工具的 parameters 定义创建 Pydantic 模型
+    
+    Args:
+        tool: 领域层工具
+        
+    Returns:
+        Pydantic 模型类或 None（无参数时）
+    """
+    params = tool.parameters
+    if not params or params.get("type") != "object":
+        return None
+    
+    properties = params.get("properties", {})
+    required = set(params.get("required", []))
+    
+    if not properties:
+        return None
+    
+    # 动态创建 Pydantic 模型
+    annotations = {}
+    field_definitions = {}
+    
+    for prop_name, prop_schema in properties.items():
+        # 推断类型
+        prop_type = prop_schema.get("type", "string")
+        if prop_type == "string":
+            py_type = str
+        elif prop_type == "integer":
+            py_type = int
+        elif prop_type == "number":
+            py_type = float
+        elif prop_type == "boolean":
+            py_type = bool
+        else:
+            py_type = str
+        
+        # 可选字段
+        if prop_name not in required:
+            py_type = py_type | None
+        
+        annotations[prop_name] = py_type
+        field_definitions[prop_name] = Field(
+            default=None if prop_name not in required else ...,
+            description=prop_schema.get("description", ""),
+        )
+    
+    # 创建模型类
+    model_name = f"{tool.name.title()}Args"
+    model = type(
+        model_name,
+        (BaseModel,),
+        {
+            "__annotations__": annotations,
+            **field_definitions,
+        },
+    )
+    
+    return model
 
 
 class ToolAdapter:
@@ -49,9 +111,15 @@ class ToolAdapter:
         """
         # 捕获 self 引用
         _domain_tool = self._domain_tool
+        
+        # 创建 args_schema
+        args_schema = _create_args_schema(_domain_tool)
 
         def _run(**kwargs: Any) -> str:
-            """执行工具的包装函数"""
+            """执行工具的包装函数
+            
+            LangChain 会传递命名参数，直接转发给工具的 execute 方法。
+            """
             try:
                 result = _domain_tool.execute(**kwargs)
                 if result.success:
@@ -62,34 +130,12 @@ class ToolAdapter:
                 logger.error(f"工具执行异常: {e}", exc_info=True)
                 return f"工具执行异常: {str(e)}"
 
-        # 构建 args_schema
-        args_schema = self._build_args_schema()
-
         return StructuredTool.from_function(
             func=_run,
-            name=self._domain_tool.name,
-            description=self._domain_tool.description,
+            name=_domain_tool.name,
+            description=_domain_tool.description,
             args_schema=args_schema,
         )
-
-    def _build_args_schema(self) -> type | None:
-        """
-        构建参数模式
-        
-        从工具的 execute 方法参数推断。
-        """
-        sig = inspect.signature(self._domain_tool.execute)
-        params = list(sig.parameters.items())
-        
-        # 跳过 self 参数
-        if params and params[0][0] == "self":
-            params = params[1:]
-        
-        # 如果有 **kwargs，使用工具定义的 parameters
-        if any(p.kind == inspect.Parameter.VAR_KEYWORD for _, p in params):
-            return None  # StructuredTool 会自动从 parameters 属性读取
-        
-        return None
 
 
 def to_langchain_tool(domain_tool: AgentTool) -> StructuredTool:

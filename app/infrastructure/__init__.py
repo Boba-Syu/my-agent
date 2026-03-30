@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from app.infrastructure.agent.langgraph.langgraph_agent import LangGraphAgent
+from app.infrastructure.agent.agno.agno_agent import AgnoAgent
 from app.infrastructure.agent.cache.agent_cache import AgentCache, InMemoryAgentCache
 from app.infrastructure.llm.llm_provider import LLMProvider, LLMConfig
 from app.infrastructure.persistence.sqlite.sqlite_transaction_repo import SQLiteTransactionRepository
@@ -21,6 +22,7 @@ from app.infrastructure.tools.tool_registry import ToolRegistry
 
 __all__ = [
     "LangGraphAgent",
+    "AgnoAgent",
     "AgentCache",
     "InMemoryAgentCache",
     "LLMProvider",

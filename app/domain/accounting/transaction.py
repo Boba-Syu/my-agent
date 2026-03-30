@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
-from decimal import Decimal
 from enum import Enum
 
-from app.domain.shared.aggregate_root import AggregateRoot
 from app.domain.accounting.money import Money
+from app.domain.shared.aggregate_root import AggregateRoot
 
 logger = logging.getLogger(__name__)
 

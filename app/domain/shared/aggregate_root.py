@@ -7,8 +7,6 @@
 from __future__ import annotations
 
 import logging
-from abc import abstractmethod
-from typing import Any
 
 from app.domain.shared.entity import Entity
 

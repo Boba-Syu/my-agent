@@ -9,9 +9,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator
-from typing import Any
 
-from app.domain.agent.agent_message import AgentMessage
 from app.domain.agent.agent_response import AgentResponse, AgentChunk, ToolUpdateResult
 from app.domain.agent.agent_tool import AgentTool
 
