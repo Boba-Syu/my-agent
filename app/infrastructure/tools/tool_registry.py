@@ -2,6 +2,7 @@
 工具注册表
 
 管理所有可用工具的注册和发现。
+实现领域层定义的 ToolRegistry 接口。
 """
 
 from __future__ import annotations
@@ -10,15 +11,20 @@ import logging
 from typing import Type
 
 from app.domain.agent.agent_tool import AgentTool
+from app.domain.agent.tool_registry import ToolRegistry as ToolRegistryInterface
 
 logger = logging.getLogger(__name__)
 
+# 导出领域层接口
+ToolRegistryInterface = ToolRegistryInterface
 
-class ToolRegistry:
+
+class ToolRegistry(ToolRegistryInterface):
     """
-    工具注册表
+    工具注册表实现
     
     管理工具实例的注册、发现和获取。
+    继承领域层 ToolRegistry 接口。
     
     Example:
         registry = ToolRegistry()
@@ -28,7 +34,7 @@ class ToolRegistry:
         tools = registry.get_all_tools()
         
         # 获取特定工具
-        calc = registry.get_tool("calculator")
+        calc = registry.get("calculator")
     """
 
     _instance: ToolRegistry | None = None
@@ -61,7 +67,7 @@ class ToolRegistry:
         for tool in tools:
             self.register(tool)
 
-    def get_tool(self, name: str) -> AgentTool | None:
+    def get(self, name: str) -> AgentTool | None:
         """
         获取工具
         
@@ -72,6 +78,9 @@ class ToolRegistry:
             工具实例，不存在返回 None
         """
         return self._tools.get(name)
+
+    # 别名，向后兼容
+    get_tool = get
 
     def get_all_tools(self) -> list[AgentTool]:
         """

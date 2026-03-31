@@ -44,17 +44,23 @@ my-agent/
 │   │   │   ├── abstract_agent.py    # Agent 抽象基类 ⭐
 │   │   │   ├── agent_message.py     # 消息值对象
 │   │   │   ├── agent_tool.py        # 工具领域接口
-│   │   │   └── agent_response.py    # 响应模型
+│   │   │   ├── agent_response.py    # 响应模型
+│   │   │   ├── agent_cache.py       # 缓存接口
+│   │   │   └── tool_registry.py     # 工具注册表接口
 │   │   └── accounting/              # 记账子域
 │   │       ├── transaction.py       # 交易聚合根
 │   │       ├── money.py             # 金额值对象
-│   │       └── transaction_repository.py # 仓库接口
+│   │       ├── transaction_repository.py # 仓库接口
+│   │       └── accounting_tool_interfaces.py # 工具接口与分类常量
 │   │
 │   ├── application/                 # 应用层 - 用例编排
 │   │   ├── agent/                   # Agent 应用服务
-│   │   │   └── agent_service.py
+│   │   │   ├── agent_service.py     # Agent 服务
+│   │   │   ├── agent_factory.py     # Agent 工厂（根据配置创建）⭐
+│   │   │   └── dto.py               # DTO
 │   │   └── accounting/              # 记账应用服务
-│   │       └── transaction_service.py
+│   │       ├── transaction_service.py
+│   │       └── accounting_agent_service.py  # 记账Agent服务
 │   │
 │   ├── infrastructure/              # 基础设施层 - 技术实现
 │   │   ├── agent/                   # Agent 实现
@@ -62,26 +68,47 @@ my-agent/
 │   │   │   │   ├── langgraph_agent.py ⭐
 │   │   │   │   └── tool_adapter.py  # 工具适配器
 │   │   │   └── cache/
-│   │   │       └── agent_cache.py   # Agent 缓存
+│   │   │       └── agent_cache.py   # 缓存实现
 │   │   ├── llm/                     # LLM 基础设施
 │   │   │   └── llm_provider.py
-│   │   └── persistence/             # 持久化实现
-│   │       ├── sqlite/
-│   │       │   └── sqlite_transaction_repo.py
-│   │       └── milvus/
+│   │   ├── tools/                   # 工具实现
+│   │   │   ├── tool_registry.py     # 工具注册表实现
+│   │   │   └── accounting/          # 记账工具（通过Repository操作数据）
+│   │   ├── persistence/             # 持久化实现
+│   │   │   ├── sqlite/
+│   │   │   │   └── sqlite_transaction_repo.py
+│   │   │   └── milvus/
+│   │   └── db/                      # 数据库访问（旧模块，逐步迁移中）
+│   │
+│   ├── prompts/                     # 提示词模块（从代码中抽离）⭐
+│   │   ├── __init__.py              # 提示词加载器
+│   │   ├── accounting/              # 记账提示词
+│   │   │   ├── system_prompt.md     # 系统提示词
+│   │   │   ├── few_shot_examples.md # Few-shot示例
+│   │   │   ├── output_schema.md     # 输出格式规范
+│   │   │   └── tool_guidelines.md   # 工具使用指南
+│   │   └── base/                    # 基础提示词
+│   │       ├── default_system_prompt.md # 默认Agent提示词
+│   │       ├── cot_guidelines.md    # 推理指导
+│   │       └── safety_guard.md      # 安全防护规则
 │   │
 │   ├── interfaces/                  # 接口层 - API 适配
-│   │   └── http/                    # HTTP 接口
+│   │   └── http/
 │   │       ├── routes/
 │   │       │   ├── agent_routes.py
 │   │       │   └── accounting_routes.py
-│   │       └── schemas/             # Pydantic DTO
+│   │       ├── schemas/             # Pydantic DTO
+│   │       └── dependencies.py      # 依赖注入配置 ⭐
 │   │
 │   └── config.py                    # 配置读取
 │
 ├── docs/
-│   └── ddd-architecture.md          # DDD 架构设计文档 ⭐
+│   ├── ddd-architecture.md          # DDD 架构设计文档 ⭐
+│   ├── agent-implementation-guide.md # Agent 实现指南
+│   ├── agent-prompt-optimization.md  # 提示词优化方案
+│   └── refactoring-summary.md        # 重构总结
 │
+├── accounting-frontend/             # 记账前端（Vue 3 + TypeScript）
 ├── application.toml                 # 全局配置（勿提交到 Git）
 ├── application.example.toml         # 配置示例文件
 ├── main.py                          # FastAPI 启动入口
@@ -213,19 +240,25 @@ class AutoGenAgent(AbstractAgent):
 
 ### 3. 应用层 (Application Layer)
 
-**编排用例，协调领域对象**
+**编排用例，协调领域对象，通过工厂和依赖注入解耦**
 
 ```python
 # app/application/agent/agent_service.py
 class AgentService:
     """Agent 应用服务"""
     
+    def __init__(self, agent_cache: AgentCache, tool_registry: ToolRegistry, agent_factory: AgentFactory):
+        # 通过依赖注入获取领域层接口
+        self._agent_cache = agent_cache
+        self._tool_registry = tool_registry
+        self._agent_factory = agent_factory
+    
     async def chat(self, request: ChatRequest) -> ChatResponse:
-        agent = self._get_or_create_agent(request.model)
-        response = await agent.ainvoke(
-            message=request.message,
-            thread_id=request.thread_id,
+        agent = self._agent_factory.create_agent(
+            model=request.model,
+            system_prompt=build_default_agent_prompt(),  # 从文件加载
         )
+        response = await agent.ainvoke(...)
         return ChatResponse(content=response.content)
 ```
 
@@ -266,27 +299,28 @@ class MyCustomAgent(AbstractAgent):
 ### 添加新工具
 
 1. 实现 `AgentTool` 接口
-2. 注册到工具注册表
+2. 需要数据访问的工具通过构造函数注入 Repository
+3. 在依赖注入配置中注册工具
 
 ```python
-# app/infrastructure/tools/calculator_tool.py
+# app/infrastructure/tools/my_tool.py
 from app.domain.agent.agent_tool import AgentTool, ToolResult
 
-class CalculatorTool(AgentTool):
+class MyTool(AgentTool):
+    def __init__(self, repository: TransactionRepository):  # 依赖注入
+        self._repository = repository
+    
     @property
     def name(self) -> str:
-        return "calculator"
+        return "my_tool"
     
     @property
     def description(self) -> str:
-        return "执行数学计算"
+        return "工具描述"
     
-    def execute(self, expression: str) -> ToolResult:
-        try:
-            result = safe_eval(expression)
-            return ToolResult.success_result(str(result))
-        except Exception as e:
-            return ToolResult.error_result(str(e))
+    def execute(self, **kwargs) -> ToolResult:
+        # 通过 Repository 操作数据
+        return ToolResult.success_result("结果")
 ```
 
 ### 运行测试
@@ -358,6 +392,9 @@ uv run ruff check .
 ## 📚 文档
 
 - [DDD 架构设计文档](docs/ddd-architecture.md) - 详细的架构规范和设计原则
+- [Agent 实现指南](docs/agent-implementation-guide.md) - Agent 开发与配置指南
+- [提示词优化方案](docs/agent-prompt-optimization.md) - 提示词设计与优化策略
+- [重构总结](docs/refactoring-summary.md) - DDD 架构重构变更记录
 - [API 文档](http://localhost:8000/docs) - FastAPI 自动生成的 Swagger 文档
 
 ---

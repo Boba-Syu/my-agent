@@ -2,20 +2,27 @@
 Agent 应用服务
 
 协调 Agent 领域对象完成用户用例。
+
+作者: AI Assistant
+日期: 2026-03-31
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from app.application.agent.agent_factory import AgentFactory
 from app.application.agent.dto import ChatRequest, ChatResponse, StreamChunk
 from app.domain.agent.abstract_agent import AbstractAgent
+from app.domain.agent.agent_cache import AgentCache
 from app.domain.agent.agent_response import ChunkType
-from app.infrastructure.agent.cache.agent_cache import AgentCache
-from app.infrastructure.llm.llm_provider import LLMProvider
-from app.infrastructure.tools.tool_registry import ToolRegistry
+from app.domain.agent.tool_registry import ToolRegistry
+from app.prompts import build_default_agent_prompt
+
+if TYPE_CHECKING:
+    pass  # 无运行时基础设施导入
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +38,7 @@ class AgentService:
     - Agent 实例缓存
     
     通过 AgentFactory 创建具体实现，只依赖 AbstractAgent 抽象。
+    所有基础设施依赖通过构造函数注入，符合 DDD 原则。
     
     Example:
         service = AgentService(
@@ -50,21 +58,18 @@ class AgentService:
         self,
         agent_cache: AgentCache,
         tool_registry: ToolRegistry,
-        llm_provider: LLMProvider | None = None,
         agent_factory: AgentFactory | None = None,
     ):
         """
         初始化应用服务
         
         Args:
-            agent_cache: Agent 缓存
-            tool_registry: 工具注册表
-            llm_provider: LLM 提供器，None 时自动创建
+            agent_cache: Agent 缓存接口（领域层抽象）
+            tool_registry: 工具注册表接口（领域层抽象）
             agent_factory: Agent 工厂，None 时自动创建
         """
         self._agent_cache = agent_cache
         self._tool_registry = tool_registry
-        self._llm_provider = llm_provider or LLMProvider()
         self._agent_factory = agent_factory or AgentFactory()
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
@@ -169,9 +174,11 @@ class AgentService:
             新的 Agent 实例
         """
         tools = self._tool_registry.get_all_tools()
-        system_prompt = custom_prompt or self._get_default_system_prompt()
         
-        # 使用工厂创建 Agent（具体实现由配置决定，默认 agno）
+        # 使用提示词加载器获取默认提示词，或使用自定义提示词
+        system_prompt = custom_prompt or build_default_agent_prompt()
+        
+        # 使用工厂创建 Agent（具体实现由配置决定）
         agent = self._agent_factory.create_agent(
             model=model,
             tools=tools,
@@ -179,23 +186,6 @@ class AgentService:
         )
         
         return agent
-
-    def _get_default_system_prompt(self) -> str:
-        """
-        获取默认系统提示词
-        
-        Returns:
-            默认系统提示词
-        """
-        return (
-            "你是一个智能记账助手，帮助用户管理日常收支。\n"
-            "你可以：\n"
-            "1. 记录收入和支出\n"
-            "2. 查询收支记录\n"
-            "3. 统计收支数据\n"
-            "4. 分析消费习惯\n"
-            "请友好地回答用户的问题。"
-        )
 
     def get_cache_info(self) -> dict:
         """
