@@ -101,27 +101,28 @@ class StatsByPeriodTool(AgentTool):
             )
             
             # 构建结果
+            # Money 对象需要通过 .amount 获取 Decimal 值，再转换为 float
             data = {
                 "start_date": start_date,
                 "end_date": end_date,
                 "income": {
-                    "total": float(stats.income_total),
+                    "total": float(stats.income_total.amount),
                     "count": stats.income_count,
                     "by_category": income_by_category,
                 },
                 "expense": {
-                    "total": float(stats.expense_total),
+                    "total": float(stats.expense_total.amount),
                     "count": stats.expense_count,
                     "by_category": expense_by_category,
                 },
-                "net": float(stats.net),
+                "net": float(stats.net.amount),
             }
             
             # 构建可读文本
             lines = [
                 f"📊 {start_date} 至 {end_date} 收支统计",
                 "",
-                f"💰 收入：{stats.income_total:.2f} 元（{stats.income_count} 笔）",
+                f"💰 收入：{float(stats.income_total.amount):.2f} 元（{stats.income_count} 笔）",
             ]
             
             if income_by_category:
@@ -130,7 +131,7 @@ class StatsByPeriodTool(AgentTool):
             
             lines.extend([
                 "",
-                f"💸 支出：{stats.expense_total:.2f} 元（{stats.expense_count} 笔）",
+                f"💸 支出：{float(stats.expense_total.amount):.2f} 元（{stats.expense_count} 笔）",
             ])
             
             if expense_by_category:
@@ -139,7 +140,7 @@ class StatsByPeriodTool(AgentTool):
             
             lines.extend([
                 "",
-                f"📈 结余：{stats.net:.2f} 元",
+                f"📈 结余：{float(stats.net.amount):.2f} 元",
             ])
             
             content = "\n".join(lines)

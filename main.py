@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_server_config
-from app.interfaces.http.routes import agent_router, accounting_router
+from app.interfaces.http.routes import agent_router, accounting_router, rag_router
 from app.utils.logging_utils import TraceIdFormatter
 
 # ---------------------------------------------------------------------------
@@ -101,6 +101,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 app.include_router(agent_router)
 app.include_router(accounting_router)
+app.include_router(rag_router)
 
 
 # ---------------------------------------------------------------------------

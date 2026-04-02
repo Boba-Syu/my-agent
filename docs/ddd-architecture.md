@@ -317,6 +317,109 @@ class TransactionRepository(ABC):
         pass
 ```
 
+### 3.5 RAG 子域 (rag/)
+
+RAG（检索增强生成）子域实现企业级知识库问答系统，支持混合检索和Agentic RAG流程。
+
+#### Document 聚合根
+```python
+class Document(AggregateRoot):
+    """
+    文档聚合根
+    
+    表示一份文档及其所有分块，是RAG系统的核心领域模型。
+    
+    聚合边界包含：
+    - 文档基本信息（标题、来源、类型）
+    - 知识库类型分类
+    - 文档分块列表
+    - 处理状态
+    """
+    
+    def __init__(
+        self,
+        id: str | None,
+        title: str,
+        source: str,
+        doc_type: str,
+        kb_type: KnowledgeBaseType,  # FAQ / REGULATION
+        content: str,
+        metadata: dict[str, Any] | None = None,
+        created_at: datetime | None = None,
+    ):
+        super().__init__(id)
+        self._title = title
+        self._source = source
+        self._doc_type = doc_type
+        self._kb_type = kb_type
+        self._content = content
+        self._metadata = metadata or {}
+        self._chunks: list[DocumentChunk] = []
+        self._status = DocumentStatus.PENDING
+        self._created_at = created_at or datetime.now()
+```
+
+#### KnowledgeBaseType 枚举
+```python
+class KnowledgeBaseType(Enum):
+    """知识库类型"""
+    
+    FAQ = "faq"
+    """FAQ知识库 - 面向客户的常见问题解答"""
+    
+    REGULATION = "regulation"
+    """规章制度知识库 - 面向员工的企业内部文档"""
+```
+
+#### RAG 领域接口
+```python
+# 文档仓库接口
+class DocumentRepository(Repository[Document]):
+    @abstractmethod
+    def search_by_vector(
+        self,
+        query: str,
+        kb_types: list[KnowledgeBaseType] | None = None,
+        top_k: int = 10,
+    ) -> list[tuple[Document, float]]:
+        pass
+
+# 向量存储接口
+class VectorStore(ABC):
+    @abstractmethod
+    def similarity_search(
+        self,
+        query_embedding: list[float],
+        kb_types: list[KnowledgeBaseType] | None = None,
+        top_k: int = 10,
+    ) -> list[tuple[str, float]]:
+        pass
+
+# 关键词索引接口
+class KeywordIndex(ABC):
+    @abstractmethod
+    def search(
+        self,
+        query: str,
+        kb_types: list[KnowledgeBaseType] | None = None,
+        top_k: int = 10,
+    ) -> list[tuple[str, float]]:
+        pass
+
+# 重排序接口
+class Reranker(ABC):
+    @abstractmethod
+    def rerank(
+        self,
+        query: str,
+        results: list[SearchResult],
+        top_k: int = 10,
+    ) -> list[RankedResult]:
+        pass
+```
+
+详细设计请参考 [rag-architecture.md](./rag-architecture.md)
+
 ## 4. 应用层 (Application Layer)
 
 ### 4.1 核心职责

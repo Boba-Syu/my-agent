@@ -1,10 +1,11 @@
 """
 LLM 工厂模块
-统一管理阿里百炼 LLM 和 Ollama Embedding 实例的创建与配置
+统一管理阿里百炼 LLM 和 Embedding 实例的创建与配置
 """
 
-from langchain_openai import ChatOpenAI
-from langchain_ollama import OllamaEmbeddings
+from __future__ import annotations
+
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 from app.config import get_llm_config, get_embedding_config
 
@@ -16,7 +17,7 @@ class LLMFactory:
     使用示例:
         llm = LLMFactory.create_llm()                    # 使用默认模型 deepseek-v3
         llm_r1 = LLMFactory.create_llm("deepseek-r1")   # 使用 deepseek-r1
-        embedding = LLMFactory.create_embedding()         # 获取 Ollama Embedding
+        embedding = LLMFactory.create_embedding()        # 获取百炼 Embedding
     """
 
     @staticmethod
@@ -42,16 +43,20 @@ class LLMFactory:
         )
 
     @staticmethod
-    def create_embedding() -> OllamaEmbeddings:
+    def create_embedding() -> OpenAIEmbeddings:
         """
-        创建 Ollama 本地 Embedding 实例
+        创建阿里百炼 Embedding 实例
+
+        使用 text-embedding-v4 模型，通过 OpenAI 兼容 API 调用。
 
         Returns:
-            OllamaEmbeddings 实例（默认使用 bge-m3:latest）
+            OpenAIEmbeddings 实例（百炼 text-embedding-v4）
         """
         emb_cfg = get_embedding_config()
 
-        return OllamaEmbeddings(
-            model=emb_cfg.get("model", "bge-m3:latest"),
-            base_url=emb_cfg.get("base_url", "http://localhost:11434"),
+        return OpenAIEmbeddings(
+            model=emb_cfg.get("model", "text-embedding-v4"),
+            api_key=emb_cfg.get("api_key", ""),
+            base_url=emb_cfg.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            dimensions=emb_cfg.get("dimensions", 1024),
         )

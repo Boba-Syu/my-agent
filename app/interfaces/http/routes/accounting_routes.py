@@ -293,8 +293,11 @@ async def get_stats(
 @router.get("/categories", response_model=CategoriesResponse, summary="获取所有分类")
 async def get_categories() -> CategoriesResponse:
     """返回支出和收入的所有支持分类"""
-    from app.db.accounting_db import EXPENSE_CATEGORIES, INCOME_CATEGORIES
-    
+    from app.domain.accounting.accounting_tool_interfaces import (
+        EXPENSE_CATEGORIES,
+        INCOME_CATEGORIES,
+    )
+
     return CategoriesResponse(
         expense_categories=EXPENSE_CATEGORIES,
         income_categories=INCOME_CATEGORIES,

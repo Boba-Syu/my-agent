@@ -111,20 +111,20 @@ class SQLiteTransactionRepository(TransactionRepository):
     def save(self, transaction: Transaction) -> Transaction:
         """
         保存交易
-        
+
         如果交易已有 ID 则更新，否则创建。
-        
+
         Args:
             transaction: 交易聚合根
-            
+
         Returns:
             保存后的交易（包含生成的 ID）
         """
         if transaction.id is None:
             # 插入新记录
-            result = self._client.execute(
+            self._client.execute(
                 """
-                INSERT INTO transactions 
+                INSERT INTO transactions
                 (transaction_type, category, amount, transaction_date, note, created_at)
                 VALUES (:type, :category, :amount, :date, :note, datetime('now'))
                 """,
@@ -136,13 +136,18 @@ class SQLiteTransactionRepository(TransactionRepository):
                     "note": transaction.note,
                 },
             )
-            # 重新加载获取完整数据
-            return self.get(str(result.lastrowid))
+            # 查询刚插入的记录（通过最大 ID）
+            rows = self._client.query(
+                "SELECT * FROM transactions ORDER BY id DESC LIMIT 1"
+            )
+            if rows:
+                return self._row_to_entity(rows[0])
+            raise RuntimeError("保存交易失败：无法获取刚插入的记录")
         else:
             # 更新现有记录
             self._client.execute(
                 """
-                UPDATE transactions 
+                UPDATE transactions
                 SET transaction_type = :type,
                     category = :category,
                     amount = :amount,

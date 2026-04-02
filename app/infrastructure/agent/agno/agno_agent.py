@@ -98,11 +98,21 @@ class AgnoAgent(AbstractAgent):
         agno_tools = self._convert_tools_to_agno()
 
         # 创建 Agno Agent
+        # 注意：阿里百炼 API 不支持 developer 角色，需要覆盖 role_map
+        # OpenAIChat 默认将 "system" 映射为 "developer"，我们需要改回 "system"
         return Agent(
             model=OpenAIChat(
                 id=self._llm_config.model,
                 api_key=self._llm_config.api_key,
                 base_url=self._llm_config.base_url,
+                # 覆盖 role_map，将 system 角色保持为 system，而不是 developer
+                role_map={
+                    "system": "system",
+                    "user": "user",
+                    "assistant": "assistant",
+                    "tool": "tool",
+                    "model": "assistant",
+                },
             ),
             tools=agno_tools,
             description=self._system_prompt,
@@ -141,16 +151,104 @@ class AgnoAgent(AbstractAgent):
         Returns:
             Agno 工具函数
         """
-        try:
-            from agno.tools import tool as agno_tool_decorator
-        except ImportError:
-            return None
+        import inspect
 
-        # 获取工具的执行函数
-        def tool_func(**kwargs) -> str:
+        # 获取工具的 execute 方法签名
+        sig = inspect.signature(tool.execute)
+        params = list(sig.parameters.values())
+        # 移除 'self' 参数
+        if params and params[0].name == 'self':
+            params = params[1:]
+        
+        # 检查是否有 **kwargs 参数
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params
+        )
+        # 获取具体的参数名（非 **kwargs）
+        concrete_params = [
+            p.name for p in params 
+            if p.kind != inspect.Parameter.VAR_KEYWORD
+        ]
+
+        def _to_snake_case(name: str) -> str:
+            """将驼峰命名转换为下划线命名"""
+            import re
+            # 处理边界情况
+            if not name:
+                return name
+            # 先处理首字母大写的情况（如 StartDate -> start_date）
+            s1 = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', name)
+            s2 = re.sub(r'([a-z\d])([A-Z])', r'\1_\2', s1)
+            return s2.lower()
+
+        def tool_func(*args, **kwargs) -> str:
             """Agno 工具函数包装"""
             try:
-                result = tool.execute(**kwargs)
+                # Agno 可能传递嵌套结构: {'args': {}, 'kwargs': {...}} 或 {'args': {...}}
+                # 需要提取真正的参数
+                actual_args = args
+                actual_kwargs = kwargs
+                
+                # 检测 Agno 的嵌套参数结构
+                # 情况1: {'args': {}, 'kwargs': {...}}
+                # 情况2: {'args': {'start_date': 'xxx', 'end_date': 'yyy'}} 只有args
+                if 'args' in kwargs and isinstance(kwargs.get('args'), dict):
+                    args_dict = kwargs.get('args', {})
+                    # 如果有 'kwargs' 键，提取它
+                    if 'kwargs' in kwargs and isinstance(kwargs.get('kwargs'), dict):
+                        actual_kwargs = kwargs.get('kwargs', {})
+                    else:
+                        actual_kwargs = {}
+                    
+                    # 将 args dict 的值作为位置参数或关键字参数
+                    # 如果 args_dict 的键是参数名，也加入 actual_kwargs
+                    if args_dict:
+                        actual_kwargs.update(args_dict)
+                    actual_args = ()
+                
+                # 调试：记录提取后的参数
+                logger.info(f"[DEBUG] 工具 [{tool.name}] 被调用")
+                logger.info(f"[DEBUG]   原始 args={args}, kwargs={kwargs}")
+                logger.info(f"[DEBUG]   提取后 actual_args={actual_args}, actual_kwargs={actual_kwargs}")
+                logger.info(f"[DEBUG]   期望参数: {concrete_params}")
+                
+                # 构建参数：将参数名转换为 snake_case 并匹配工具期望的参数
+                tool_args = {}
+                
+                # 处理位置参数：将 args 映射到 concrete_params
+                for i, arg in enumerate(actual_args):
+                    if i < len(concrete_params):
+                        param_name = concrete_params[i]
+                        tool_args[param_name] = arg
+                    elif has_var_keyword:
+                        logger.warning(f"[DEBUG] 工具 [{tool.name}] 收到额外的位置参数: {arg}")
+                
+                # 创建参数名映射（snake_case -> 原始值）处理关键字参数
+                normalized_kwargs = {}
+                for key, value in actual_kwargs.items():
+                    normalized_key = _to_snake_case(key)
+                    normalized_kwargs[normalized_key] = value
+                
+                logger.info(f"[DEBUG]   normalized_kwargs={normalized_kwargs}")
+                
+                # 提取工具定义的具体参数（关键字参数优先覆盖位置参数）
+                for param_name in concrete_params:
+                    if param_name in normalized_kwargs:
+                        tool_args[param_name] = normalized_kwargs.pop(param_name)
+                
+                logger.info(f"[DEBUG]   匹配后的 tool_args={tool_args}")
+                
+                # 检查必需参数是否缺失
+                missing_params = [p for p in concrete_params if p not in tool_args]
+                if missing_params:
+                    return f"参数错误: 缺少必需参数 {missing_params}。请提供: {', '.join(missing_params)}"
+                
+                # 如果工具接受 **kwargs，将剩余参数也传入（使用 snake_case 键）
+                if has_var_keyword and normalized_kwargs:
+                    tool_args.update(normalized_kwargs)
+                
+                result = tool.execute(**tool_args)
+                
                 if result.success:
                     return result.content
                 else:

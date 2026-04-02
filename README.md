@@ -25,6 +25,7 @@
 - **流式输出**：SSE 实时响应
 - **模型切换**：支持 deepseek-v3 / deepseek-r1 等模型
 - **向量检索**：内置 Milvus 向量数据库支持
+- **RAG知识库**：Agentic RAG检索，支持FAQ和规章制度两种知识库
 
 ---
 
@@ -47,20 +48,31 @@ my-agent/
 │   │   │   ├── agent_response.py    # 响应模型
 │   │   │   ├── agent_cache.py       # 缓存接口
 │   │   │   └── tool_registry.py     # 工具注册表接口
-│   │   └── accounting/              # 记账子域
-│   │       ├── transaction.py       # 交易聚合根
-│   │       ├── money.py             # 金额值对象
-│   │       ├── transaction_repository.py # 仓库接口
-│   │       └── accounting_tool_interfaces.py # 工具接口与分类常量
+│   │   ├── accounting/              # 记账子域
+│   │   │   ├── transaction.py       # 交易聚合根
+│   │   │   ├── money.py             # 金额值对象
+│   │   │   ├── transaction_repository.py # 仓库接口
+│   │   │   └── accounting_tool_interfaces.py # 工具接口与分类常量
+│   │   └── rag/                     # RAG知识库子域
+│   │       ├── document.py          # 文档聚合根
+│   │       ├── knowledge_base_type.py # 知识库类型枚举
+│   │       ├── document_repository.py # 文档仓库接口
+│   │       ├── vector_store.py      # 向量存储接口
+│   │       ├── keyword_index.py     # 关键词索引接口
+│   │       └── reranker.py          # 重排序接口
 │   │
 │   ├── application/                 # 应用层 - 用例编排
 │   │   ├── agent/                   # Agent 应用服务
 │   │   │   ├── agent_service.py     # Agent 服务
 │   │   │   ├── agent_factory.py     # Agent 工厂（根据配置创建）⭐
 │   │   │   └── dto.py               # DTO
-│   │   └── accounting/              # 记账应用服务
-│   │       ├── transaction_service.py
-│   │       └── accounting_agent_service.py  # 记账Agent服务
+│   │   ├── accounting/              # 记账应用服务
+│   │   │   ├── transaction_service.py
+│   │   │   └── accounting_agent_service.py  # 记账Agent服务
+│   │   └── rag/                     # RAG知识库服务
+│   │       ├── rag_service.py       # RAG检索服务
+│   │       ├── document_service.py  # 文档处理服务
+│   │       └── dto.py               # DTO
 │   │
 │   ├── infrastructure/              # 基础设施层 - 技术实现
 │   │   ├── agent/                   # Agent 实现
