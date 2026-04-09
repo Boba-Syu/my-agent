@@ -1,7 +1,7 @@
 """
-Milvus 向量存储实现
+Chroma 向量存储实现
 
-实现领域层定义的VectorStore接口。
+实现领域层定义的VectorStore接口，支持 Windows 平台。
 """
 
 from __future__ import annotations
@@ -10,9 +10,9 @@ import logging
 from typing import Any
 
 from langchain_core.embeddings import Embeddings
-from langchain_milvus import Milvus
+from langchain_chroma import Chroma
 
-from app.config import get_milvus_config
+from app.config import get_config
 from app.domain.rag.document_chunk import DocumentChunk
 from app.domain.rag.knowledge_base_type import KnowledgeBaseType
 from app.domain.rag.vector_store import VectorStore
@@ -20,11 +20,11 @@ from app.domain.rag.vector_store import VectorStore
 logger = logging.getLogger(__name__)
 
 
-class MilvusVectorStore(VectorStore):
+class ChromaVectorStore(VectorStore):
     """
-    Milvus 向量存储实现
+    Chroma 向量存储实现
     
-    使用 Milvus Lite 本地文件模式，无需启动服务。
+    使用 Chroma 本地文件模式，支持 Windows 平台。
     实现领域层定义的VectorStore接口。
     """
     
@@ -34,23 +34,24 @@ class MilvusVectorStore(VectorStore):
         collection_name: str | None = None,
     ):
         """
-        初始化 Milvus 向量存储
+        初始化 Chroma 向量存储
         
         Args:
             embedding: Embedding模型，None时从工厂创建
             collection_name: 集合名称，None时使用配置默认值
         """
-        milvus_cfg = get_milvus_config()
-        self._uri = milvus_cfg.get("uri", "./data/milvus_rag.db")
-        self._collection_name = collection_name or milvus_cfg.get(
+        config = get_config()
+        chroma_cfg = config.get("chroma", {})
+        self._persist_directory = chroma_cfg.get("persist_directory", "./data/chroma_db")
+        self._collection_name = collection_name or chroma_cfg.get(
             "collection_name", "rag_vectors"
         )
         
         # 延迟加载embedding
         self._embedding = embedding
-        self._store: Milvus | None = None
+        self._store: Chroma | None = None
         
-        logger.info(f"MilvusVectorStore初始化: uri={self._uri}, collection={self._collection_name}")
+        logger.info(f"ChromaVectorStore初始化: persist_directory={self._persist_directory}, collection={self._collection_name}")
     
     def _get_embedding(self) -> Embeddings:
         """获取Embedding模型（延迟加载）"""
@@ -59,14 +60,13 @@ class MilvusVectorStore(VectorStore):
             self._embedding = LLMFactory.create_embedding()
         return self._embedding
     
-    def _get_store(self) -> Milvus:
-        """获取Milvus存储（延迟初始化）"""
+    def _get_store(self) -> Chroma:
+        """获取Chroma存储（延迟初始化）"""
         if self._store is None:
-            self._store = Milvus(
+            self._store = Chroma(
                 embedding_function=self._get_embedding(),
                 collection_name=self._collection_name,
-                connection_args={"uri": self._uri},
-                auto_id=True,
+                persist_directory=self._persist_directory,
             )
         return self._store
     
@@ -115,7 +115,7 @@ class MilvusVectorStore(VectorStore):
         store = self._get_store()
         ids = store.add_texts(texts=texts, metadatas=metadatas)
         
-        logger.debug(f"添加 {len(chunks)} 个分块到Milvus，文档: {document_id}")
+        logger.debug(f"添加 {len(chunks)} 个分块到Chroma，文档: {document_id}")
         return ids
     
     def similarity_search(
@@ -137,33 +137,43 @@ class MilvusVectorStore(VectorStore):
         Returns:
             (分块ID, 相似度分数) 列表
         """
-        # 构建过滤表达式
-        expr_parts = []
+        # 构建过滤条件（Chroma 使用字典格式）
+        filter_dict: dict[str, Any] = {}
         
         if kb_types:
-            kb_values = [f'"{t.value}"' for t in kb_types]
-            expr_parts.append(f"kb_type in [{', '.join(kb_values)}]")
+            kb_values = [t.value for t in kb_types]
+            filter_dict["kb_type"] = {"$in": kb_values}
         
         if filters:
-            for key, value in filters.items():
-                expr_parts.append(f'{key} == "{value}"')
-        
-        expr = " and ".join(expr_parts) if expr_parts else None
+            filter_dict.update(filters)
         
         store = self._get_store()
         
-        # 使用embedding搜索（需要先包装为Document）
-        from langchain_core.documents import Document
-        query_doc = Document(page_content="", metadata={"embedding": query_embedding})
-        
-        results = store.similarity_search_with_score(
-            query="",  # 不使用文本查询
-            k=top_k,
-            expr=expr,
-        )
-        
-        # 返回 (chunk_id, score) 列表
-        return [(str(doc.metadata.get("chunk_index", 0)), score) for doc, score in results]
+        # 使用 Chroma 底层 API 进行向量搜索
+        # 通过 _collection 直接访问 chromadb 的 query 方法
+        try:
+            where_filter = filter_dict if filter_dict else None
+            results = store._collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                where=where_filter,
+                include=["metadatas", "distances"],
+            )
+            
+            # 返回 (chunk_id, score) 列表
+            # 注意：Chroma 返回的是距离，需要转换为相似度分数
+            chunks = []
+            if results and results["metadatas"] and results["metadatas"][0]:
+                for metadata, distance in zip(results["metadatas"][0], results["distances"][0]):
+                    # 将距离转换为相似度分数（Chroma使用余弦距离的变种）
+                    # 距离越小表示越相似
+                    score = 1.0 - min(distance, 1.0)
+                    chunks.append((str(metadata.get("chunk_index", 0)), score))
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"向量检索失败: {e}", exc_info=True)
+            return []
     
     def delete_by_document(self, document_id: str) -> bool:
         """
@@ -177,7 +187,8 @@ class MilvusVectorStore(VectorStore):
         """
         try:
             store = self._get_store()
-            store.delete(expr=f'document_id == "{document_id}"')
+            # Chroma 使用 where 参数过滤
+            store.delete(where={"document_id": document_id})
             logger.debug(f"删除文档分块: {document_id}")
             return True
         except Exception as e:
@@ -194,8 +205,18 @@ class MilvusVectorStore(VectorStore):
         Returns:
             分块，不存在返回None
         """
-        # Milvus不支持直接按ID获取，需要通过搜索
-        logger.warning("MilvusVectorStore.get_chunk_by_id 未完全实现")
+        # Chroma 可以通过 metadata 过滤获取
+        try:
+            store = self._get_store()
+            results = store.get(where={"chunk_index": int(chunk_id)})
+            if results and results["documents"]:
+                return DocumentChunk(
+                    content=results["documents"][0],
+                    chunk_index=int(chunk_id),
+                    metadata=results["metadatas"][0] if results["metadatas"] else {},
+                )
+        except Exception as e:
+            logger.error(f"获取分块失败: {chunk_id}, 错误: {e}")
         return None
     
     def health_check(self) -> bool:
@@ -205,5 +226,5 @@ class MilvusVectorStore(VectorStore):
             # 尝试简单操作检查连接
             return True
         except Exception as e:
-            logger.error(f"Milvus健康检查失败: {e}")
+            logger.error(f"Chroma健康检查失败: {e}")
             return False

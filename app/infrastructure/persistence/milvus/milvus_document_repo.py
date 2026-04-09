@@ -66,6 +66,7 @@ class MilvusDocumentRepository(DocumentRepository):
     
     def list(
         self,
+        kb_id: str | None = None,
         kb_type: KnowledgeBaseType | None = None,
         status: str | None = None,
         limit: int = 100,
@@ -168,4 +169,5 @@ class MilvusDocumentRepository(DocumentRepository):
             kb_type=KnowledgeBaseType(metadata.get("kb_type", "faq")),
             content="",  # 内容不存储在元数据中
             metadata=metadata,
+            kb_id=metadata.get("kb_id", ""),
         )

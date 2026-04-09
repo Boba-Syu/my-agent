@@ -75,6 +75,7 @@ class Document(AggregateRoot):
         content: str,
         metadata: dict[str, Any] | None = None,
         created_at: datetime | None = None,
+        kb_id: str = "",
     ):
         """
         初始化文档聚合根
@@ -88,6 +89,7 @@ class Document(AggregateRoot):
             content: 文档原始内容
             metadata: 文档元数据
             created_at: 创建时间
+            kb_id: 知识库ID
             
         Raises:
             ValueError: 参数验证失败
@@ -114,6 +116,7 @@ class Document(AggregateRoot):
         self._error_message: str | None = None
         self._created_at = created_at or datetime.now()
         self._updated_at = self._created_at
+        self._kb_id = kb_id
         
         logger.debug(f"创建文档: {self}")
     
@@ -191,6 +194,11 @@ class Document(AggregateRoot):
         """是否已处理完成"""
         return self._status == DocumentStatus.PROCESSED
     
+    @property
+    def kb_id(self) -> str:
+        """知识库ID"""
+        return self._kb_id
+    
     # -------------------------------------------------------------------------
     # 业务方法
     # -------------------------------------------------------------------------
@@ -216,6 +224,27 @@ class Document(AggregateRoot):
         self._increment_version()
         
         logger.debug(f"文档分块完成: {self._title}, 共 {len(chunks)} 个分块")
+    
+    def set_no_chunking(self) -> None:
+        """
+        设置为不分块模式
+        
+        将整个文档内容作为一个虚拟分块保存。
+        """
+        from app.domain.rag.document_chunk import DocumentChunk
+        
+        # 创建一个大分块包含全部内容
+        chunk = DocumentChunk(
+            content=self._content,
+            chunk_index=0,
+            metadata={"is_full_text": True},
+        )
+        self._chunks = [chunk]
+        self._status = DocumentStatus.PROCESSED
+        self._updated_at = datetime.now()
+        self._increment_version()
+        
+        logger.debug(f"文档设置为不分块模式: {self._title}")
     
     def mark_processing(self) -> None:
         """标记为处理中"""

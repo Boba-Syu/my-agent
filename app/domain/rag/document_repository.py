@@ -49,6 +49,7 @@ class DocumentRepository(Repository[Document]):
     @abstractmethod
     def list(
         self,
+        kb_id: str | None = None,
         kb_type: KnowledgeBaseType | None = None,
         status: str | None = None,
         limit: int = 100,
@@ -58,6 +59,7 @@ class DocumentRepository(Repository[Document]):
         查询文档列表
         
         Args:
+            kb_id: 按知识库ID过滤
             kb_type: 按知识库类型过滤
             status: 按处理状态过滤
             limit: 返回条数限制

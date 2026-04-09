@@ -13,6 +13,8 @@ data/
 *.db-journal
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
 
 # ============================================
 # Python 运行时文件
@@ -26,6 +28,15 @@ __pycache__/
 dist/
 build/
 *.egg
+
+# ============================================
+# Python 特定
+# ============================================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
 
 # ============================================
 # 虚拟环境
@@ -46,6 +57,7 @@ env/
 .DS_Store
 *.sublime-project
 *.sublime-workspace
+.history/
 
 # ============================================
 # 日志文件
@@ -62,6 +74,10 @@ log/
 htmlcov/
 .tox/
 .nox/
+.nyc_output/
+coverage/
+*.cover
+.hypothesis/
 
 # ============================================
 # uv 包管理器
@@ -81,3 +97,74 @@ temp/
 *.tmp
 *.bak
 *.cache
+
+# ============================================
+# 前端 - accounting-frontend
+# ============================================
+accounting-frontend/node_modules/
+accounting-frontend/dist/
+accounting-frontend/build/
+accounting-frontend/.vite/
+accounting-frontend/.local/
+accounting-frontend/*.local
+
+# ============================================
+# 前端 - rag-frontend
+# ============================================
+rag-frontend/node_modules/
+rag-frontend/dist/
+rag-frontend/build/
+rag-frontend/.vite/
+rag-frontend/.local/
+rag-frontend/*.local
+
+# ============================================
+# 前端通用
+# ============================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+.npm/
+.yarn/
+.pnp.*
+.eslintcache
+.stylelintcache
+*.tsbuildinfo
+
+# ============================================
+# 静态文件上传目录
+# ============================================
+static/uploads/
+uploads/
+media/
+
+# ============================================
+# 文档构建
+# ============================================
+site/
+docs/_build/
+
+# ============================================
+# Jupyter Notebook
+# ============================================
+.ipynb_checkpoints
+
+# ============================================
+# 其他
+# ============================================
+*.pid
+*.seed
+*.pid.lock
+.lock-wscript
+.grunt
+bower_components
+jspm_packages/
+web_modules/
+*.tgz
+*.tar.gz
+*.zip
+*.rar
+*.7z

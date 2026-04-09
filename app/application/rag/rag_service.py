@@ -13,12 +13,18 @@ RAG 应用服务
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from typing import Any
+from datetime import datetime
+from typing import Any, AsyncGenerator
 
 from langchain_openai import ChatOpenAI
 
-from app.application.rag.dto import RAGQueryRequest, RAGQueryResponse
+from app.application.rag.dto import (
+    RAGQueryRequest, 
+    RAGQueryResponse,
+    RagStreamEventDTO,
+)
 from app.config import get_llm_config
 from app.domain.rag.knowledge_base_type import KnowledgeBaseType
 from app.domain.rag.query import Query, SubQuery
@@ -101,6 +107,237 @@ class RAGService:
         # 构建响应
         response = RAGQueryResponse.from_ranked_results(answer, ranked_results)
         return response
+    
+    async def query_stream(
+        self,
+        request: RAGQueryRequest,
+    ) -> AsyncGenerator[RagStreamEventDTO, None]:
+        """
+        执行RAG流式查询
+        
+        以流式方式返回处理流程的各个步骤和最终结果。
+        
+        Args:
+            request: 查询请求
+            
+        Yields:
+            流式事件：process, chunk, sources, complete, error
+        """
+        logger.info(f"RAG流式查询: {request.query}")
+        
+        # 初始化流程状态
+        process_state = self._init_process_state(request.query)
+        
+        try:
+            # 1. 查询分解
+            yield self._update_process_step(process_state, "query_decomposition", "running")
+            query = await self._decompose_query(request)
+            process_state["query_decomposition"].update({
+                "status": "completed",
+                "original_query": request.query,
+                "sub_queries": [sq.query for sq in query.sub_queries],
+            })
+            yield self._update_process_step(process_state, "query_decomposition", "completed")
+            
+            # 2. 向量检索
+            yield self._update_process_step(process_state, "vector_retrieval", "running")
+            all_vector_results = []
+            total_chunks = 0
+            
+            for sub_query in query.sub_queries:
+                query_embedding = await self._embedding.aembed_query(sub_query.query)
+                vector_results = await self._vector_search(sub_query, query_embedding)
+                all_vector_results.extend(vector_results)
+                total_chunks += len(vector_results)
+            
+            process_state["vector_retrieval"].update({
+                "status": "completed",
+                "total_chunks": total_chunks,
+                "retrieved_chunks": [
+                    {
+                        "chunk_id": r.chunk.chunk_id if hasattr(r.chunk, 'chunk_id') else str(i),
+                        "document_id": r.document_id or "unknown",
+                        "document_title": r.document_title or "未知文档",
+                        "content": r.content[:200] + "..." if len(r.content) > 200 else r.content,
+                        "score": r.score,
+                    }
+                    for i, r in enumerate(all_vector_results[:10])  # 只返回前10个
+                ],
+            })
+            yield self._update_process_step(process_state, "vector_retrieval", "completed")
+            
+            # 3. 关键词检索
+            yield self._update_process_step(process_state, "keyword_retrieval", "running")
+            all_keyword_results = []
+            all_keywords = []
+            
+            for sub_query in query.sub_queries:
+                keyword_results = await self._keyword_search(sub_query)
+                all_keyword_results.extend(keyword_results)
+                # 提取关键词（简单处理：使用查询词作为关键词）
+                all_keywords.extend(sub_query.query.split())
+            
+            process_state["keyword_retrieval"].update({
+                "status": "completed",
+                "keywords": list(set(all_keywords))[:10],  # 去重后取前10
+                "matched_chunks": [
+                    {
+                        "chunk_id": r.chunk.chunk_id if hasattr(r.chunk, 'chunk_id') else str(i),
+                        "document_id": r.document_id or "unknown",
+                        "document_title": r.document_title or "未知文档",
+                        "content": r.content[:200] + "..." if len(r.content) > 200 else r.content,
+                        "score": r.score,
+                    }
+                    for i, r in enumerate(all_keyword_results[:5])
+                ],
+            })
+            yield self._update_process_step(process_state, "keyword_retrieval", "completed")
+            
+            # 4. RAG-Fusion和重排序
+            yield self._update_process_step(process_state, "reranking", "running")
+            fused_results = self._rag_fusion(all_vector_results + all_keyword_results)
+            ranked_results = await self._rerank(request.query, fused_results, request.top_k)
+            
+            process_state["reranking"].update({
+                "status": "completed",
+                "input_chunks": len(fused_results),
+                "output_chunks": len(ranked_results),
+                "ranked_chunks": [
+                    {
+                        "chunk_id": r.search_result.chunk.chunk_id if hasattr(r.search_result.chunk, 'chunk_id') else str(i),
+                        "document_id": r.search_result.document_id or "unknown",
+                        "document_title": r.search_result.document_title or "未知文档",
+                        "content": r.content[:200] + "..." if len(r.content) > 200 else r.content,
+                        "score": r.rerank_score,
+                        "original_rank": i + 1,
+                        "new_rank": r.rank,
+                    }
+                    for i, r in enumerate(ranked_results)
+                ],
+            })
+            yield self._update_process_step(process_state, "reranking", "completed")
+            
+            # 5. 答案生成（流式）
+            yield self._update_process_step(process_state, "answer_generation", "running")
+            
+            # 发送来源信息
+            sources = [
+                {
+                    "document_id": r.search_result.document_id or "unknown",
+                    "document_title": r.search_result.document_title or "未知文档",
+                    "content": r.content[:500] + "..." if len(r.content) > 500 else r.content,
+                    "score": r.rerank_score,
+                }
+                for r in ranked_results
+            ]
+            yield RagStreamEventDTO(type="sources", data=sources)
+            
+            # 流式生成答案
+            answer = ""
+            if ranked_results:
+                context_parts = []
+                for i, r in enumerate(ranked_results[:5], 1):
+                    context_parts.append(f"[文档{i}] {r.content[:800]}")
+                context = "\n\n".join(context_parts)
+                prompt = build_answer_generation_prompt(request.query, context)
+                
+                # 尝试使用流式生成
+                try:
+                    async for chunk in self._llm.astream(prompt):
+                        content = chunk.content if hasattr(chunk, 'content') else str(chunk)
+                        answer += content
+                        yield RagStreamEventDTO(type="chunk", data=content)
+                except Exception as e:
+                    logger.warning(f"流式生成失败，使用非流式: {e}")
+                    # 回退到非流式
+                    response = await self._llm.ainvoke(prompt)
+                    answer = response.content
+                    yield RagStreamEventDTO(type="chunk", data=answer)
+            else:
+                answer = "抱歉，在知识库中没有找到相关信息。"
+                yield RagStreamEventDTO(type="chunk", data=answer)
+            
+            process_state["answer_generation"].update({
+                "status": "completed",
+                "used_chunks": len(ranked_results),
+                "tokens_generated": len(answer),
+            })
+            yield self._update_process_step(process_state, "answer_generation", "completed")
+            
+            # 完成
+            final_response = RAGQueryResponse.from_ranked_results(answer, ranked_results)
+            yield RagStreamEventDTO(
+                type="complete",
+                data={
+                    "answer": answer,
+                    "sources": [
+                        {
+                            "document_id": s.document_id,
+                            "document_title": s.document_title,
+                            "content": s.content,
+                            "score": s.score,
+                        }
+                        for s in final_response.sources
+                    ],
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"RAG流式查询失败: {e}", exc_info=True)
+            yield RagStreamEventDTO(
+                type="error",
+                data={"message": f"处理失败: {str(e)}"}
+            )
+    
+    def _init_process_state(self, query: str) -> dict:
+        """初始化流程状态"""
+        now = datetime.now().isoformat()
+        return {
+            "query_decomposition": {
+                "status": "pending",
+                "original_query": query,
+                "sub_queries": [],
+                "start_time": now,
+            },
+            "vector_retrieval": {
+                "status": "pending",
+                "total_chunks": 0,
+                "retrieved_chunks": [],
+                "start_time": None,
+            },
+            "keyword_retrieval": {
+                "status": "pending",
+                "keywords": [],
+                "matched_chunks": [],
+                "start_time": None,
+            },
+            "reranking": {
+                "status": "pending",
+                "input_chunks": 0,
+                "output_chunks": 0,
+                "ranked_chunks": [],
+                "start_time": None,
+            },
+            "answer_generation": {
+                "status": "pending",
+                "used_chunks": 0,
+                "tokens_generated": 0,
+                "start_time": None,
+            },
+        }
+    
+    def _update_process_step(
+        self,
+        state: dict,
+        step: str,
+        status: str,
+    ) -> RagStreamEventDTO:
+        """更新流程步骤状态"""
+        state[step]["status"] = status
+        if status in ("running", "completed"):
+            state[step]["end_time" if status == "completed" else "start_time"] = datetime.now().isoformat()
+        
+        return RagStreamEventDTO(type="process", data=state.copy())
     
     async def _decompose_query(self, request: RAGQueryRequest) -> Query:
         """

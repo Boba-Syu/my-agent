@@ -15,9 +15,9 @@ dependencies = [
     "langchain-openai>=0.2.0",
     # Embedding：Ollama 本地
     "langchain-ollama>=0.2.0",
-    # 向量数据库
-    "langchain-milvus>=0.1.0",
-    "pymilvus>=2.4.0",
+    # 向量数据库（Chroma 支持 Windows，Milvus 仅支持 Linux/macOS）
+    "langchain-chroma>=0.0.5",
+    "chromadb>=0.4.0",
     # 关系型数据库
     "sqlalchemy>=2.0.0",
     # 配置文件解析（tomllib Python 3.11+ 内置，此为兼容包）
@@ -29,6 +29,8 @@ dependencies = [
     "openpyxl>=3.1.0",
     # 文件上传支持
     "python-multipart>=0.0.20",
+    "pytest>=9.0.2",
+    "whoosh>=2.7.4",
 ]
 
 [build-system]

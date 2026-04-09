@@ -38,18 +38,24 @@ class VectorStore(ABC):
     def add_chunks(
         self,
         document_id: str,
+        title: str,
+        source: str,
         chunks: list[DocumentChunk],
         embeddings: list[list[float]],
         kb_type: KnowledgeBaseType,
+        kb_id: str = "",
     ) -> list[str]:
         """
         添加文档分块及其向量
         
         Args:
             document_id: 文档ID
+            title: 文档标题
+            source: 文档来源
             chunks: 文档分块列表
             embeddings: 对应的向量嵌入列表
             kb_type: 知识库类型
+            kb_id: 知识库ID
             
         Returns:
             存储的记录ID列表

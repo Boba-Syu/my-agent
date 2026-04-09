@@ -50,8 +50,13 @@ def get_sqlite_config() -> dict:
 
 
 def get_milvus_config() -> dict:
-    """返回 Milvus 数据库配置"""
+    """返回 Milvus 数据库配置（已弃用，请使用 get_chroma_config）"""
     return config.get("database", {}).get("milvus", {})
+
+
+def get_chroma_config() -> dict:
+    """返回 Chroma 数据库配置"""
+    return config.get("database", {}).get("chroma", {})
 
 
 def get_server_config() -> dict:
@@ -62,3 +67,8 @@ def get_server_config() -> dict:
 def get_agent_config() -> dict:
     """返回 Agent 行为配置"""
     return config.get("agent", {})
+
+
+def get_config() -> dict:
+    """返回完整配置字典"""
+    return config

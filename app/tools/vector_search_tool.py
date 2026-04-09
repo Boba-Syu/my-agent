@@ -1,6 +1,6 @@
 """
 向量检索工具
-调用 MilvusClient 进行语义相似度检索，适用于知识库问答场景
+调用 ChromaClient 进行语义相似度检索，适用于知识库问答场景
 
 扩展方式：调整检索参数（k、filter）或在此文件中新增文档入库工具
 """
@@ -13,17 +13,17 @@ from langchain_core.tools import tool
 logger = logging.getLogger(__name__)
 
 
-def _get_milvus_client():
+def _get_chroma_client():
     """
-    延迟初始化 MilvusClient（避免模块加载时立即连接，减少启动开销）
+    延迟初始化 ChromaClient（避免模块加载时立即连接，减少启动开销）
     使用 lru_cache 确保单例复用
     """
     # 延迟导入，避免循环依赖
-    from app.db.milvus_client import MilvusClient
+    from app.db.chroma_client import ChromaClient
     from app.llm.llm_factory import LLMFactory
 
     embedding = LLMFactory.create_embedding()
-    return MilvusClient(embedding)
+    return ChromaClient(embedding)
 
 
 @tool
@@ -44,7 +44,7 @@ def vector_search(query: str, k: int = 4) -> str:
     logging.debug("vector_search 工具调用，入参：query={}", query)
 
     try:
-        client = _get_milvus_client()
+        client = _get_chroma_client()
         results = client.similarity_search_with_score(query=query, k=k)
 
         if not results:

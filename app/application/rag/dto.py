@@ -97,8 +97,23 @@ class DocumentUploadRequest:
     kb_type: str = "faq"
     """知识库类型"""
     
+    kb_id: str = ""
+    """知识库ID"""
+    
     metadata: dict[str, Any] | None = None
     """额外元数据"""
+    
+    chunking_strategy: str = "fixed_size"
+    """分块策略: none/fixed_size/separator/paragraph"""
+    
+    chunk_size: int = 500
+    """分块大小（固定大小时使用）"""
+    
+    chunk_overlap: int = 50
+    """分块重叠大小"""
+    
+    separator: str = ""
+    """分隔符（按分隔符分块时使用）"""
 
 
 @dataclass(frozen=True)
@@ -129,16 +144,150 @@ class DocumentDTO:
     char_count: int
     """字符数"""
     
+    kb_id: str = ""
+    """知识库ID"""
+    
+    created_at: str = ""
+    """创建时间"""
+    
+    updated_at: str = ""
+    """更新时间"""
+    
     @classmethod
     def from_entity(cls, entity: Document) -> DocumentDTO:
         """从领域实体创建 DTO"""
+        created_at = getattr(entity, 'created_at', None)
+        updated_at = getattr(entity, 'updated_at', None)
+        # 使用属性访问器获取 kb_id（不是 _kb_id）
+        kb_id = entity.kb_id if hasattr(entity, 'kb_id') else ''
         return cls(
             id=entity.id or "",
             title=entity.title,
             source=entity.source,
             doc_type=entity.doc_type,
             kb_type=entity.kb_type.value,
+            kb_id=kb_id,
             status=entity.status.value,
             chunk_count=entity.chunk_count,
             char_count=entity.char_count,
+            created_at=created_at.isoformat() if created_at else "",
+            updated_at=updated_at.isoformat() if updated_at else "",
         )
+
+
+@dataclass(frozen=True)
+class KnowledgeBaseDTO:
+    """知识库数据 DTO"""
+    
+    id: str
+    """知识库ID"""
+    
+    name: str
+    """名称"""
+    
+    description: str
+    """描述"""
+    
+    kb_type: str
+    """类型"""
+    
+    document_count: int
+    """文档数量"""
+    
+    created_at: str
+    """创建时间"""
+    
+    updated_at: str
+    """更新时间"""
+    
+    @classmethod
+    def from_entity(cls, entity: Any) -> KnowledgeBaseDTO:
+        """从领域实体创建 DTO"""
+        return cls(
+            id=entity.id,
+            name=entity.name,
+            description=entity.description,
+            kb_type=entity.kb_type.value,
+            document_count=entity.document_count,
+            created_at=entity.created_at.isoformat() if entity.created_at else "",
+            updated_at=entity.updated_at.isoformat() if entity.updated_at else "",
+        )
+
+
+@dataclass(frozen=True)
+class CreateKnowledgeBaseRequest:
+    """创建知识库请求 DTO"""
+    
+    name: str
+    """名称"""
+    
+    description: str = ""
+    """描述"""
+    
+    kb_type: str = "faq"
+    """类型"""
+
+
+@dataclass(frozen=True)
+class CreateTextDocumentRequest:
+    """创建文本文档请求 DTO"""
+    
+    kb_id: str
+    """知识库ID"""
+    
+    title: str
+    """标题"""
+    
+    content: str
+    """内容"""
+    
+    kb_type: str = "faq"
+    """知识库类型"""
+
+
+@dataclass(frozen=True)
+class RagProcessStepDTO:
+    """RAG处理步骤 DTO"""
+    
+    status: str
+    """状态"""
+    
+    start_time: str | None = None
+    """开始时间"""
+    
+    end_time: str | None = None
+    """结束时间"""
+    
+    details: dict[str, Any] | None = None
+    """详情"""
+
+
+@dataclass(frozen=True)
+class RagProcessDTO:
+    """RAG处理流程 DTO"""
+    
+    query_decomposition: dict[str, Any]
+    """查询分解"""
+    
+    vector_retrieval: dict[str, Any]
+    """向量检索"""
+    
+    keyword_retrieval: dict[str, Any]
+    """关键词检索"""
+    
+    reranking: dict[str, Any]
+    """重排序"""
+    
+    answer_generation: dict[str, Any]
+    """答案生成"""
+
+
+@dataclass(frozen=True)
+class RagStreamEventDTO:
+    """RAG流式事件 DTO"""
+    
+    type: str
+    """事件类型: process, chunk, sources, complete, error"""
+    
+    data: Any
+    """事件数据"""
