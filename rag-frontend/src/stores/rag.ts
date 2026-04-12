@@ -317,7 +317,9 @@ export const useRagStore = defineStore('rag', () => {
             onProcessUpdate(currentProcess.value)
             break
           case 'chunk':
-            const chunk = event.data as string
+            // 后端发送的是 {content: string}，需要提取 content 字段
+            const chunkData = event.data as { content?: string; [key: string]: unknown }
+            const chunk = typeof chunkData === 'string' ? chunkData : (chunkData.content || '')
             streamingAnswer.value += chunk
             onChunk(chunk)
             break

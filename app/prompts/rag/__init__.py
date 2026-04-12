@@ -6,6 +6,68 @@ RAG 提示词模块
 
 from __future__ import annotations
 
+import os
+
+
+def _load_prompt_file(filename: str) -> str:
+    """从文件加载提示词"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    file_path = os.path.join(current_dir, filename)
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+
+def build_coze_agent_system_prompt() -> str:
+    """
+    构建Coze客服智能体系统提示词
+
+    Returns:
+        Coze客服人设提示词
+    """
+    return _load_prompt_file("coze_agent_system_prompt.md")
+
+
+def build_react_guidelines() -> str:
+    """
+    构建ReAct模式指导
+
+    Returns:
+        ReAct模式指导文档
+    """
+    return _load_prompt_file("react_guidelines.md")
+
+
+def build_agentic_rag_prompt() -> str:
+    """
+    构建Agentic RAG完整提示词
+
+    组合Coze人设 + ReAct指导
+
+    Returns:
+        完整的Agentic RAG系统提示词
+    """
+    system_prompt = build_coze_agent_system_prompt()
+    react_guidelines = build_react_guidelines()
+
+    return f"""{system_prompt}
+
+---
+
+## ReAct模式参考
+
+{react_guidelines}
+
+---
+
+## 当前任务
+
+现在请根据用户的输入，按照上述ReAct模式进行思考和行动。
+请显式输出你的思考过程（Thought），然后决定行动（Action）。
+"""
+
 
 def build_query_decomposition_prompt(query: str) -> str:
     """

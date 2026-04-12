@@ -190,24 +190,30 @@ class DocumentService:
         Returns:
             文档DTO
         """
-        logger.info(f"上传文档: {request.file_path}, 策略: {request.chunking_strategy}")
+        logger.info(f"[DocumentService] 开始上传文档 | file={request.file_path}")
+        logger.debug(f"[DocumentService] 处理参数: kb_type={request.kb_type}, kb_id={request.kb_id}, strategy={request.chunking_strategy}")
         
         # 确定标题
         title = request.title
         if not title:
             import os
             title = os.path.basename(request.file_path)
+        logger.debug(f"[DocumentService] 文档标题: {title}")
         
         # 创建文档聚合根
         kb_type = KnowledgeBaseType.from_string(request.kb_type)
         
         # 读取文本内容
+        logger.debug("[DocumentService] 步骤1: 文档解析")
         processor = self._processor_factory.get_processor(request.file_path)
         content, _ = processor.process(request.file_path)
+        logger.info(f"[DocumentService] 文档解析完成 | 内容长度={len(content)}")
         
         # 创建分块配置并执行分块
+        logger.debug("[DocumentService] 步骤2: 文本分块")
         chunking_config = self._create_chunking_config(request)
         chunks = self._chunk_content(content, chunking_config)
+        logger.info(f"[DocumentService] 文本分块完成 | 分块数={len(chunks)}")
         
         document = Document(
             id=str(uuid.uuid4()),
@@ -222,16 +228,21 @@ class DocumentService:
         
         # 标记处理中
         document.mark_processing()
+        logger.debug(f"[DocumentService] 文档ID: {document.id}, 状态: 处理中")
         
         try:
             # 保存分块到聚合根
+            logger.debug("[DocumentService] 步骤3: 保存分块到聚合根")
             document.split_into_chunks(chunks)
             
             # 生成嵌入向量
+            logger.debug("[DocumentService] 步骤4: 生成嵌入向量")
             texts = [chunk.content for chunk in chunks]
             embeddings = await self._embedding.aembed_documents(texts)
+            logger.info(f"[DocumentService] 嵌入向量生成完成 | 向量数={len(embeddings)}, 维度={len(embeddings[0]) if embeddings else 0}")
             
             # 存储到向量库
+            logger.debug("[DocumentService] 步骤5: 存储到向量库")
             self._vector_store.add_chunks(
                 document_id=document.id,
                 title=title,
@@ -241,24 +252,28 @@ class DocumentService:
                 kb_type=kb_type,
                 kb_id=request.kb_id,
             )
+            logger.info(f"[DocumentService] 向量库存储完成")
             
             # 存储到关键词索引
+            logger.debug("[DocumentService] 步骤6: 存储到关键词索引")
             self._keyword_index.add_document(
                 document_id=document.id,
                 chunks=chunks,
                 kb_type=kb_type,
             )
+            logger.info(f"[DocumentService] 关键词索引存储完成")
             
             # 保存文档元数据
+            logger.debug("[DocumentService] 步骤7: 保存文档元数据")
             saved = self._repository.save(document)
             
-            logger.info(f"文档处理完成: {saved.id}, {len(chunks)}个分块")
+            logger.info(f"[DocumentService] 文档处理完成 | doc_id={saved.id}, chunks={len(chunks)}")
             return DocumentDTO.from_entity(saved)
             
         except Exception as e:
             document.mark_failed(str(e))
             self._repository.save(document)
-            logger.error(f"文档处理失败: {e}")
+            logger.error(f"[DocumentService] 文档处理失败: {e}")
             raise
     
     def list_documents(
@@ -307,16 +322,26 @@ class DocumentService:
         Returns:
             是否成功删除
         """
+        logger.info(f"[DocumentService] 开始删除文档 | doc_id={document_id}")
         try:
             # 删除向量库数据
+            logger.debug("[DocumentService] 删除向量库数据")
             self._vector_store.delete_by_document(document_id)
             
             # 删除关键词索引
+            logger.debug("[DocumentService] 删除关键词索引")
             self._keyword_index.delete_document(document_id)
             
             # 删除文档记录
-            return self._repository.delete(document_id)
+            logger.debug("[DocumentService] 删除文档记录")
+            result = self._repository.delete(document_id)
+            
+            if result:
+                logger.info(f"[DocumentService] 文档删除成功 | doc_id={document_id}")
+            else:
+                logger.warning(f"[DocumentService] 文档删除失败 | doc_id={document_id}")
+            return result
             
         except Exception as e:
-            logger.error(f"删除文档失败: {e}")
+            logger.error(f"[DocumentService] 删除文档失败: {e}")
             return False

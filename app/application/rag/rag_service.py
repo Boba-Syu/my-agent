@@ -83,29 +83,45 @@ class RAGService:
         Returns:
             查询响应
         """
-        logger.info(f"RAG查询: {request.query}")
+        logger.info(f"[RAGService] 开始RAG查询 | query={request.query[:50]}...")
+        logger.debug(f"[RAGService] 请求参数: top_k={request.top_k}, kb_types={request.kb_types}")
         
         # 1. 查询分解和知识库路由
+        logger.debug("[RAGService] 步骤1: 查询分解")
         query = await self._decompose_query(request)
-        logger.debug(f"查询分解完成: {len(query.sub_queries)}个子查询")
+        logger.info(f"[RAGService] 查询分解完成 | 子查询数={len(query.sub_queries)}")
+        for i, sq in enumerate(query.sub_queries):
+            logger.debug(f"[RAGService]   子查询{i+1}: {sq.query[:50]}... | kb_types={[k.value for k in sq.kb_types]}")
         
         # 2. 并行检索
+        logger.debug("[RAGService] 步骤2: 并行检索")
         search_results = await self._parallel_search(query)
-        logger.debug(f"检索完成: {len(search_results)}条结果")
+        logger.info(f"[RAGService] 并行检索完成 | 结果数={len(search_results)}")
+        vector_count = sum(1 for r in search_results if r.source == "vector")
+        keyword_count = sum(1 for r in search_results if r.source == "keyword")
+        logger.debug(f"[RAGService]   向量检索结果: {vector_count}, 关键词检索结果: {keyword_count}")
         
         # 3. RAG-Fusion去重
+        logger.debug("[RAGService] 步骤3: RAG-Fusion去重")
         fused_results = self._rag_fusion(search_results)
-        logger.debug(f"RAG-Fusion后: {len(fused_results)}条结果")
+        logger.info(f"[RAGService] RAG-Fusion完成 | 去重前={len(search_results)}, 去重后={len(fused_results)}")
         
         # 4. 重排序
+        logger.debug("[RAGService] 步骤4: 重排序")
         ranked_results = await self._rerank(request.query, fused_results, request.top_k)
-        logger.debug(f"重排序完成: 前{len(ranked_results)}条")
+        logger.info(f"[RAGService] 重排序完成 | 返回前{len(ranked_results)}条")
+        if ranked_results:
+            scores = [f"{r.rerank_score:.4f}" for r in ranked_results[:5]]
+            logger.debug(f"[RAGService]   前5条重排序分数: {scores}")
         
         # 5. 答案生成
+        logger.debug("[RAGService] 步骤5: 答案生成")
         answer = await self._generate_answer(request.query, ranked_results)
+        logger.info(f"[RAGService] 答案生成完成 | 答案长度={len(answer)}")
         
         # 构建响应
         response = RAGQueryResponse.from_ranked_results(answer, ranked_results)
+        logger.info(f"[RAGService] RAG查询完成 | 引用来源数={len(response.sources)}")
         return response
     
     async def query_stream(
@@ -123,7 +139,7 @@ class RAGService:
         Yields:
             流式事件：process, chunk, sources, complete, error
         """
-        logger.info(f"RAG流式查询: {request.query}")
+        logger.info(f"[RAGService] 开始RAG流式查询 | query={request.query[:50]}...")
         
         # 初始化流程状态
         process_state = self._init_process_state(request.query)
@@ -248,7 +264,7 @@ class RAGService:
                         answer += content
                         yield RagStreamEventDTO(type="chunk", data=content)
                 except Exception as e:
-                    logger.warning(f"流式生成失败，使用非流式: {e}")
+                    logger.warning(f"[RAGService] 流式生成失败，回退到非流式: {e}")
                     # 回退到非流式
                     response = await self._llm.ainvoke(prompt)
                     answer = response.content
@@ -283,7 +299,7 @@ class RAGService:
             )
             
         except Exception as e:
-            logger.error(f"RAG流式查询失败: {e}", exc_info=True)
+            logger.error(f"[RAGService] RAG流式查询失败: {e}", exc_info=True)
             yield RagStreamEventDTO(
                 type="error",
                 data={"message": f"处理失败: {str(e)}"}
@@ -351,8 +367,11 @@ class RAGService:
         Returns:
             分解后的查询对象
         """
+        logger.debug(f"[_decompose_query] 开始查询分解 | query={request.query[:50]}...")
+        
         # 如果指定了知识库类型，不进行分解
         if request.kb_types:
+            logger.debug(f"[_decompose_query] 指定了知识库类型，跳过分解 | kb_types={request.kb_types}")
             kb_types = [KnowledgeBaseType(t) for t in request.kb_types]
             sub_query = SubQuery(
                 query=request.query,
@@ -364,11 +383,13 @@ class RAGService:
             )
         
         # 使用LLM分解查询
+        logger.debug("[_decompose_query] 调用LLM进行查询分解")
         prompt = build_query_decomposition_prompt(request.query)
         
         try:
             response = await self._llm.ainvoke(prompt)
             content = response.content
+            logger.debug(f"[_decompose_query] LLM响应长度={len(content)}")
             
             # 解析响应（预期JSON格式）
             import json
@@ -390,19 +411,24 @@ class RAGService:
                         weight=sq.get("weight", 1.0),
                     ))
                 
+                logger.info(f"[_decompose_query] 查询分解完成 | 子查询数={len(sub_queries)}")
+                for i, sq in enumerate(sub_queries):
+                    logger.debug(f"[_decompose_query]   子查询{i+1}: {sq.query[:50]}... | kb_types={[k.value for k in sq.kb_types]} | weight={sq.weight}")
+                
                 return Query(
                     original_query=request.query,
                     sub_queries=sub_queries,
                 )
+            else:
+                logger.warning(f"[_decompose_query] 未从LLM响应中提取到JSON，返回原始查询")
+                return Query(
+                    original_query=request.query,
+                    sub_queries=[SubQuery(query=request.query, kb_types=[KnowledgeBaseType.FAQ])],
+                )
         
         except Exception as e:
-            logger.warning(f"查询分解失败: {e}，使用原始查询")
-        
-        # 失败时使用原始查询，自动判断知识库
-        return Query(
-            original_query=request.query,
-            sub_queries=[SubQuery(query=request.query, kb_types=list(KnowledgeBaseType))],
-        )
+            logger.error(f"[_decompose_query] 查询分解失败: {e}", exc_info=True)
+            raise
     
     async def _parallel_search(self, query: Query) -> list[SearchResult]:
         """
@@ -462,9 +488,9 @@ class RAGService:
             
             return search_results
         except Exception as e:
-            logger.error(f"向量检索失败: {e}")
-            return []
-    
+            logger.error(f"向量检索失败: {e}", exc_info=True)
+            raise
+
     async def _keyword_search(self, sub_query: SubQuery) -> list[SearchResult]:
         """关键词检索"""
         try:
@@ -490,9 +516,9 @@ class RAGService:
             
             return search_results
         except Exception as e:
-            logger.error(f"关键词检索失败: {e}")
-            return []
-    
+            logger.error(f"关键词检索失败: {e}", exc_info=True)
+            raise
+
     def _rag_fusion(self, results: list[SearchResult]) -> list[SearchResult]:
         """
         RAG-Fusion结果融合
@@ -566,12 +592,8 @@ class RAGService:
         
         prompt = build_answer_generation_prompt(query, context)
         
-        try:
-            response = await self._llm.ainvoke(prompt)
-            return response.content
-        except Exception as e:
-            logger.error(f"答案生成失败: {e}")
-            return "抱歉，生成答案时出现错误。"
+        response = await self._llm.ainvoke(prompt)
+        return response.content
 
 
 # 导入DocumentChunk用于类型提示

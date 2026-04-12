@@ -21,6 +21,20 @@ from app.interfaces.http.schemas.accounting_schemas import (
     OperationResponse,
     StatsResponse,
 )
+from app.interfaces.http.schemas.rag_schemas import (
+    RAGQueryRequestSchema,
+    RAGQueryResponseSchema,
+    SourceInfoSchema,
+    DocumentUploadResponseSchema,
+    DocumentListResponseSchema,
+    CreateTextDocumentRequestSchema,
+    CreateTextDocumentResponseSchema,
+    KnowledgeBaseCreateRequestSchema,
+    KnowledgeBaseUpdateRequestSchema,
+    KnowledgeBaseResponseSchema,
+    SuccessResponseSchema,
+    HealthCheckResponseSchema,
+)
 
 __all__ = [
     # Agent schemas
@@ -36,4 +50,17 @@ __all__ = [
     "UpdateRecordRequest",
     "OperationResponse",
     "StatsResponse",
+    # RAG schemas
+    "RAGQueryRequestSchema",
+    "RAGQueryResponseSchema",
+    "SourceInfoSchema",
+    "DocumentUploadResponseSchema",
+    "DocumentListResponseSchema",
+    "CreateTextDocumentRequestSchema",
+    "CreateTextDocumentResponseSchema",
+    "KnowledgeBaseCreateRequestSchema",
+    "KnowledgeBaseUpdateRequestSchema",
+    "KnowledgeBaseResponseSchema",
+    "SuccessResponseSchema",
+    "HealthCheckResponseSchema",
 ]

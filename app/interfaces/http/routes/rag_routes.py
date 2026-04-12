@@ -8,158 +8,39 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Annotated, Any, AsyncGenerator
+from typing import AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 
 from app.application.rag.dto import (
-    RAGQueryRequest, 
+    RAGQueryRequest,
     DocumentUploadRequest,
     CreateKnowledgeBaseRequest,
-    CreateTextDocumentRequest,
 )
-from app.application.rag.rag_service import RAGService
-from app.application.rag.document_service import DocumentService
-from app.application.rag.knowledge_base_service import KnowledgeBaseService
+from app.interfaces.http.dependencies import (
+    RAGServiceDep,
+    AgenticRAGServiceDep,
+    DocumentServiceDep,
+    KnowledgeBaseServiceDep,
+)
+from app.interfaces.http.schemas.rag_schemas import (
+    RAGQueryRequestSchema,
+    RAGQueryResponseSchema,
+    SourceInfoSchema,
+    DocumentUploadResponseSchema,
+    DocumentListResponseSchema,
+    CreateTextDocumentRequestSchema,
+    CreateTextDocumentResponseSchema,
+    KnowledgeBaseCreateRequestSchema,
+    KnowledgeBaseResponseSchema,
+    SuccessResponseSchema,
+    HealthCheckResponseSchema,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/rag", tags=["RAG知识库"])
-
-
-# ───────────────────────────────────────────────────────────
-# 请求/响应模型
-# ───────────────────────────────────────────────────────────
-
-class RAGQueryRequestSchema(BaseModel):
-    """RAG查询请求"""
-    query: str
-    kb_types: list[str] | None = None
-    top_k: int = 10
-
-
-class SourceInfoSchema(BaseModel):
-    """来源信息"""
-    document_id: str
-    document_title: str
-    content: str
-    score: float
-
-
-class RAGQueryResponseSchema(BaseModel):
-    """RAG查询响应"""
-    answer: str
-    sources: list[SourceInfoSchema]
-
-
-class DocumentUploadResponseSchema(BaseModel):
-    """文档上传响应"""
-    id: str
-    title: str
-    status: str
-    chunkCount: int
-
-
-class DocumentListResponseSchema(BaseModel):
-    """文档列表响应"""
-    id: str
-    title: str
-    docType: str
-    kbType: str
-    kbId: str
-    status: str
-    chunkCount: int
-    createdAt: str
-
-
-class KnowledgeBaseCreateRequestSchema(BaseModel):
-    """创建知识库请求"""
-    name: str
-    description: str = ""
-    kb_type: str = "faq"
-
-
-class KnowledgeBaseResponseSchema(BaseModel):
-    """知识库响应"""
-    id: str
-    name: str
-    description: str
-    kbType: str
-    documentCount: int
-    createdAt: str
-    updatedAt: str
-
-
-class CreateTextDocumentRequestSchema(BaseModel):
-    """创建文本文档请求"""
-    kbId: str
-    title: str
-    content: str
-    chunkingStrategy: str = "none"  # none/fixed_size/separator/paragraph
-    chunkSize: int = 500
-    chunkOverlap: int = 50
-    separator: str = ""
-
-
-class CreateTextDocumentResponseSchema(BaseModel):
-    """创建文本文档响应"""
-    id: str
-    title: str
-    docType: str
-    kbId: str
-    kbType: str
-    chunkCount: int
-    status: str
-
-
-# ───────────────────────────────────────────────────────────
-# 依赖注入
-# ───────────────────────────────────────────────────────────
-
-def get_rag_service() -> RAGService:
-    """获取RAG服务"""
-    from app.infrastructure.persistence.chroma import ChromaVectorStore
-    from app.infrastructure.persistence.whoosh import WhooshKeywordIndex
-    from app.infrastructure.rag.reranker.bailian_reranker import BailianReranker
-    
-    vector_store = ChromaVectorStore()
-    keyword_index = WhooshKeywordIndex()
-    reranker = BailianReranker()
-    
-    return RAGService(
-        vector_store=vector_store,
-        keyword_index=keyword_index,
-        reranker=reranker,
-    )
-
-
-def get_document_service() -> DocumentService:
-    """获取文档服务"""
-    from app.infrastructure.persistence.chroma import ChromaVectorStore, ChromaDocumentRepository
-    from app.infrastructure.persistence.whoosh import WhooshKeywordIndex
-    from app.infrastructure.persistence.sqlite import SQLiteKnowledgeBaseRepository
-    
-    return DocumentService(
-        document_repository=ChromaDocumentRepository(),
-        vector_store=ChromaVectorStore(),
-        keyword_index=WhooshKeywordIndex(),
-    )
-
-
-def get_kb_service() -> KnowledgeBaseService:
-    """获取知识库服务"""
-    from app.infrastructure.persistence.sqlite import SQLiteKnowledgeBaseRepository
-    
-    return KnowledgeBaseService(
-        repository=SQLiteKnowledgeBaseRepository(),
-    )
-
-
-RAGServiceDep = Annotated[RAGService, Depends(get_rag_service)]
-DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
-KBServiceDep = Annotated[KnowledgeBaseService, Depends(get_kb_service)]
 
 
 # ───────────────────────────────────────────────────────────
@@ -168,7 +49,7 @@ KBServiceDep = Annotated[KnowledgeBaseService, Depends(get_kb_service)]
 
 @router.get("/knowledge-bases", response_model=list[KnowledgeBaseResponseSchema], summary="获取知识库列表")
 async def list_knowledge_bases(
-    service: KBServiceDep,
+    service: KnowledgeBaseServiceDep,
     kb_type: str | None = Query(default=None, description="知识库类型过滤"),
 ) -> list[KnowledgeBaseResponseSchema]:
     """获取所有知识库"""
@@ -194,7 +75,7 @@ async def list_knowledge_bases(
 @router.post("/knowledge-bases", response_model=KnowledgeBaseResponseSchema, summary="创建知识库")
 async def create_knowledge_base(
     request: KnowledgeBaseCreateRequestSchema,
-    service: KBServiceDep,
+    service: KnowledgeBaseServiceDep,
 ) -> KnowledgeBaseResponseSchema:
     """创建新知识库"""
     try:
@@ -223,7 +104,7 @@ async def create_knowledge_base(
 @router.get("/knowledge-bases/{kb_id}", response_model=KnowledgeBaseResponseSchema, summary="获取知识库详情")
 async def get_knowledge_base(
     kb_id: str,
-    service: KBServiceDep,
+    service: KnowledgeBaseServiceDep,
 ) -> KnowledgeBaseResponseSchema:
     """获取知识库详情"""
     try:
@@ -250,7 +131,7 @@ async def get_knowledge_base(
 async def update_knowledge_base(
     kb_id: str,
     request: KnowledgeBaseCreateRequestSchema,
-    service: KBServiceDep,
+    service: KnowledgeBaseServiceDep,
 ) -> KnowledgeBaseResponseSchema:
     """更新知识库"""
     try:
@@ -275,16 +156,16 @@ async def update_knowledge_base(
         raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
 
 
-@router.delete("/knowledge-bases/{kb_id}", summary="删除知识库")
+@router.delete("/knowledge-bases/{kb_id}", response_model=SuccessResponseSchema, summary="删除知识库")
 async def delete_knowledge_base(
     kb_id: str,
-    service: KBServiceDep,
-) -> dict:
+    service: KnowledgeBaseServiceDep,
+) -> SuccessResponseSchema:
     """删除知识库"""
     try:
         success = service.delete_knowledge_base(kb_id)
         if success:
-            return {"success": True, "message": "删除成功"}
+            return SuccessResponseSchema(success=True, message="删除成功")
         else:
             raise HTTPException(status_code=404, detail="知识库不存在")
     except HTTPException:
@@ -302,10 +183,15 @@ async def delete_knowledge_base(
 async def rag_query(
     request: RAGQueryRequestSchema,
     service: RAGServiceDep,
+    agentic_service: AgenticRAGServiceDep,
 ) -> RAGQueryResponseSchema:
     """
     执行RAG检索查询
-    
+
+    支持两种模式：
+    - 传统RAG：固定流程（查询分解→检索→重排序→生成）
+    - Agentic RAG：ReAct模式，Agent自主决策是否检索
+
     流程：
     1. 查询分解和知识库路由
     2. 混合检索（向量+关键词）
@@ -318,9 +204,14 @@ async def rag_query(
             kb_types=request.kb_types,
             top_k=request.top_k,
         )
-        
-        response = await service.query(dto_request)
-        
+
+        # 根据use_agentic参数选择服务模式
+        if getattr(request, 'use_agentic', False):
+            logger.info("使用Agentic RAG模式")
+            response = await agentic_service.query(dto_request)
+        else:
+            response = await service.query(dto_request)
+
         return RAGQueryResponseSchema(
             answer=response.answer,
             sources=[
@@ -341,19 +232,23 @@ async def rag_query(
 @router.get("/query/stream", summary="RAG流式查询(SSE)")
 async def rag_query_stream(
     query: str = Query(..., description="查询内容"),
-    kb_id: str = Query(..., description="知识库ID"),
+    kb_id: str = Query(default="", description="知识库ID"),
     kb_type: str | None = Query(default=None, description="知识库类型"),
     top_k: int = Query(default=10, description="返回结果数量"),
+    use_agentic: bool = Query(default=True, description="使用Agentic RAG模式"),
     service: RAGServiceDep = None,
+    agentic_service: AgenticRAGServiceDep = None,
 ):
     """
     执行RAG流式检索查询（SSE）
-    
+
     以Server-Sent Events方式流式返回：
     1. 处理流程状态（query_decomposition, vector_retrieval等）
     2. 答案片段（chunk）
     3. 来源文档（sources）
     4. 完成事件（complete）或错误事件（error）
+
+    支持Agentic RAG模式，可观察Agent思考过程。
     """
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
@@ -362,8 +257,11 @@ async def rag_query_stream(
                 kb_types=[kb_type] if kb_type else None,
                 top_k=top_k,
             )
-            
-            async for event in service.query_stream(dto_request):
+
+            # 根据模式选择服务
+            stream_service = agentic_service if use_agentic else service
+
+            async for event in stream_service.query_stream(dto_request):
                 # 将事件转换为SSE格式
                 data = json.dumps({
                     "type": event.type,
@@ -381,7 +279,7 @@ async def rag_query_stream(
     
     return StreamingResponse(
         event_generator(),
-        media_type="text/event-stream",
+        media_type="text/event-stream; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
@@ -557,16 +455,16 @@ async def create_text_document(
         raise HTTPException(status_code=500, detail=f"创建失败: {str(e)}")
 
 
-@router.delete("/documents/{document_id}", summary="删除文档")
+@router.delete("/documents/{document_id}", response_model=SuccessResponseSchema, summary="删除文档")
 async def delete_document(
     document_id: str,
     service: DocumentServiceDep,
-) -> dict:
+) -> SuccessResponseSchema:
     """删除指定文档及其所有分块"""
     try:
         success = service.delete_document(document_id)
         if success:
-            return {"success": True, "message": "删除成功"}
+            return SuccessResponseSchema(success=True, message="删除成功")
         else:
             raise HTTPException(status_code=404, detail="文档不存在或删除失败")
     except HTTPException:
@@ -577,16 +475,122 @@ async def delete_document(
 
 
 # ───────────────────────────────────────────────────────────
+# Agentic RAG 专用接口
+# ───────────────────────────────────────────────────────────
+
+@router.post("/query/agentic", response_model=RAGQueryResponseSchema, summary="Agentic RAG查询")
+async def agentic_rag_query(
+    request: RAGQueryRequestSchema,
+    service: AgenticRAGServiceDep,
+) -> RAGQueryResponseSchema:
+    """
+    执行Agentic RAG查询（ReAct模式）
+
+    智能体自主决策：
+    - 判断是否需要检索知识库
+    - 决定检索策略（知识库类型、关键词）
+    - 基于检索结果生成答案或进一步检索
+
+    人设：Coze客服助手，专业、热情、耐心
+    """
+    try:
+        from app.application.rag.dto import RAGQueryRequest
+
+        dto_request = RAGQueryRequest(
+            query=request.query,
+            kb_types=request.kb_types,
+            top_k=request.top_k,
+            session_id=request.session_id,
+            use_agentic=True,
+        )
+
+        response = await service.query(dto_request)
+
+        return RAGQueryResponseSchema(
+            answer=response.answer,
+            sources=[
+                SourceInfoSchema(
+                    document_id=s.document_id,
+                    document_title=s.document_title,
+                    content=s.content,
+                    score=s.score,
+                )
+                for s in response.sources
+            ],
+        )
+    except Exception as e:
+        logger.error(f"Agentic RAG查询失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@router.get("/query/agentic/stream", summary="Agentic RAG流式查询(SSE)")
+async def agentic_rag_query_stream(
+    query: str = Query(..., description="查询内容"),
+    kb_type: str | None = Query(default=None, description="知识库类型"),
+    top_k: int = Query(default=10, description="返回结果数量"),
+    session_id: str | None = Query(default=None, description="会话ID"),
+    service: AgenticRAGServiceDep = None,
+):
+    """
+    执行Agentic RAG流式检索查询（SSE）
+
+    以Server-Sent Events方式流式返回：
+    1. 开始事件（start）
+    2. Agent思考过程（thought）
+    3. 工具调用（action）
+    4. 答案片段（chunk）
+    5. 完成事件（complete）或错误事件（error）
+    """
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            from app.application.rag.dto import RAGQueryRequest
+
+            dto_request = RAGQueryRequest(
+                query=query,
+                kb_types=[kb_type] if kb_type else None,
+                top_k=top_k,
+                session_id=session_id,
+                use_agentic=True,
+            )
+
+            async for event in service.query_stream(dto_request):
+                # 将事件转换为SSE格式
+                data = json.dumps({
+                    "type": event.type,
+                    "data": event.data,
+                }, ensure_ascii=False)
+                yield f"data: {data}\n\n"
+
+        except Exception as e:
+            logger.error(f"Agentic RAG流式查询失败: {e}", exc_info=True)
+            error_data = json.dumps({
+                "type": "error",
+                "data": {"message": f"流式查询失败: {str(e)}"},
+            }, ensure_ascii=False)
+            yield f"data: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ───────────────────────────────────────────────────────────
 # 健康检查
 # ───────────────────────────────────────────────────────────
 
-@router.get("/health", summary="RAG服务健康检查")
-async def health_check() -> dict:
+@router.get("/health", response_model=HealthCheckResponseSchema, summary="RAG服务健康检查")
+async def health_check() -> HealthCheckResponseSchema:
     """检查RAG服务状态"""
-    return {
-        "status": "ok",
-        "services": {
+    return HealthCheckResponseSchema(
+        status="ok",
+        services={
             "vector_store": "connected",
             "keyword_index": "connected",
         },
-    }
+    )

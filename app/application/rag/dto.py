@@ -17,18 +17,27 @@ from app.domain.rag.search_result import RankedResult
 @dataclass(frozen=True)
 class RAGQueryRequest:
     """RAG查询请求 DTO"""
-    
+
     query: str
     """用户查询"""
-    
+
     kb_types: list[str] | None = None
     """指定检索的知识库类型，None表示自动判断"""
-    
+
     top_k: int = 10
     """返回结果数量"""
-    
+
     use_rerank: bool = True
     """是否使用重排序"""
+
+    model: str | None = None
+    """使用模型，None时使用默认配置"""
+
+    session_id: str | None = None
+    """会话ID，用于保持上下文"""
+
+    use_agentic: bool = False
+    """是否使用Agentic RAG模式"""
 
 
 @dataclass(frozen=True)
