@@ -289,10 +289,15 @@ class HybridSearchTool(AgentTool):
                 else:
                     doc_id, idx = chunk_id, "0"
 
-                # 构造简化分块（实际项目中应查询完整内容）
+                # 从关键词索引获取实际分块内容
+                content = self._keyword_index.get_chunk_content(chunk_id)
+                if not content:
+                    # 如果无法获取内容，使用提示文本
+                    content = "[无法获取文档内容]"
+
                 from app.domain.rag.document_chunk import DocumentChunk
                 chunk = DocumentChunk(
-                    content=f"[Keyword匹配] 文档片段",
+                    content=content,
                     chunk_index=int(idx) if idx.isdigit() else 0,
                     metadata={"chunk_id": chunk_id, "document_id": doc_id},
                 )
@@ -310,6 +315,24 @@ class HybridSearchTool(AgentTool):
         except Exception as e:
             logger.error(f"[HybridSearch] 关键词检索失败: {e}")
             raise
+
+    def _get_result_key(self, result: SearchResult) -> str:
+        """
+        生成结果的唯一key用于去重
+
+        使用 document_id + chunk_index 的组合作为key，
+        确保同一分块的不同检索结果能正确去重。
+
+        Args:
+            result: 检索结果
+
+        Returns:
+            唯一key
+        """
+        doc_id = result.document_id or "unknown"
+        # 尝试从chunk.metadata获取chunk_index
+        chunk_idx = result.chunk.chunk_index if result.chunk else 0
+        return f"{doc_id}_{chunk_idx}"
 
     def _fuse_results(
         self,
@@ -331,14 +354,14 @@ class HybridSearchTool(AgentTool):
         # RRF常数
         k = 60
 
-        # 构建内容到结果的映射
+        # 构建唯一key到结果的映射
         all_results = {}
 
         # 处理向量结果
         for rank, result in enumerate(vector_results, 1):
-            content_key = result.content[:100]  # 使用前100字符作为key
-            if content_key not in all_results:
-                all_results[content_key] = {
+            result_key = self._get_result_key(result)
+            if result_key not in all_results:
+                all_results[result_key] = {
                     "result": result,
                     "vector_rank": rank,
                     "keyword_rank": None,
@@ -346,11 +369,14 @@ class HybridSearchTool(AgentTool):
 
         # 处理关键词结果
         for rank, result in enumerate(keyword_results, 1):
-            content_key = result.content[:100]
-            if content_key in all_results:
-                all_results[content_key]["keyword_rank"] = rank
+            result_key = self._get_result_key(result)
+            if result_key in all_results:
+                all_results[result_key]["keyword_rank"] = rank
+                # 如果关键词结果有内容，优先使用（因为关键词结果可能更准确）
+                if result.content and len(result.content) > 20:
+                    all_results[result_key]["result"] = result
             else:
-                all_results[content_key] = {
+                all_results[result_key] = {
                     "result": result,
                     "vector_rank": None,
                     "keyword_rank": rank,

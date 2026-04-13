@@ -31,6 +31,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "pytest>=9.0.2",
     "whoosh>=2.7.4",
+    "jieba>=0.42.1",
 ]
 
 [build-system]

@@ -127,28 +127,28 @@ class ChromaVectorStore(VectorStore):
     ) -> list[tuple[str, float]]:
         """
         向量相似度检索
-        
+
         Args:
             query_embedding: 查询向量
             kb_types: 知识库类型过滤
             top_k: 返回结果数量
             filters: 元数据过滤条件
-            
+
         Returns:
-            (分块ID, 相似度分数) 列表
+            (Chroma记录ID, 相似度分数) 列表
         """
         # 构建过滤条件（Chroma 使用字典格式）
         filter_dict: dict[str, Any] = {}
-        
+
         if kb_types:
             kb_values = [t.value for t in kb_types]
             filter_dict["kb_type"] = {"$in": kb_values}
-        
+
         if filters:
             filter_dict.update(filters)
-        
+
         store = self._get_store()
-        
+
         # 使用 Chroma 底层 API 进行向量搜索
         # 通过 _collection 直接访问 chromadb 的 query 方法
         try:
@@ -159,18 +159,18 @@ class ChromaVectorStore(VectorStore):
                 where=where_filter,
                 include=["metadatas", "distances"],
             )
-            
-            # 返回 (chunk_id, score) 列表
+
+            # 返回 (chroma_id, score) 列表
             # 注意：Chroma 返回的是距离，需要转换为相似度分数
             chunks = []
-            if results and results["metadatas"] and results["metadatas"][0]:
-                for metadata, distance in zip(results["metadatas"][0], results["distances"][0]):
+            if results and results["ids"] and results["ids"][0]:
+                for chroma_id, distance in zip(results["ids"][0], results["distances"][0]):
                     # 将距离转换为相似度分数（Chroma使用余弦距离的变种）
                     # 距离越小表示越相似
                     score = 1.0 - min(distance, 1.0)
-                    chunks.append((str(metadata.get("chunk_index", 0)), score))
+                    chunks.append((chroma_id, score))
             return chunks
-            
+
         except Exception as e:
             logger.error(f"向量检索失败: {e}", exc_info=True)
             return []
@@ -198,22 +198,23 @@ class ChromaVectorStore(VectorStore):
     def get_chunk_by_id(self, chunk_id: str) -> DocumentChunk | None:
         """
         根据ID获取分块
-        
+
         Args:
-            chunk_id: 分块ID
-            
+            chunk_id: Chroma记录ID
+
         Returns:
             分块，不存在返回None
         """
-        # Chroma 可以通过 metadata 过滤获取
+        # 使用 Chroma ID 直接获取
         try:
             store = self._get_store()
-            results = store.get(where={"chunk_index": int(chunk_id)})
-            if results and results["documents"]:
+            results = store.get(ids=[chunk_id])
+            if results and results["documents"] and len(results["documents"]) > 0:
+                metadata = results["metadatas"][0] if results["metadatas"] else {}
                 return DocumentChunk(
                     content=results["documents"][0],
-                    chunk_index=int(chunk_id),
-                    metadata=results["metadatas"][0] if results["metadatas"] else {},
+                    chunk_index=metadata.get("chunk_index", 0),
+                    metadata=metadata,
                 )
         except Exception as e:
             logger.error(f"获取分块失败: {chunk_id}, 错误: {e}")

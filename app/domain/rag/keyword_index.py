@@ -83,3 +83,18 @@ class KeywordIndex(ABC):
     def optimize(self) -> None:
         """优化索引（合并段、清理等）"""
         pass
+
+    @abstractmethod
+    def get_chunk_content(self, chunk_id: str) -> str | None:
+        """
+        根据chunk_id获取分块内容
+
+        用于关键词检索后获取实际的分块内容。
+
+        Args:
+            chunk_id: 分块ID (格式: {document_id}_{chunk_index})
+
+        Returns:
+            分块内容，不存在返回None
+        """
+        pass
